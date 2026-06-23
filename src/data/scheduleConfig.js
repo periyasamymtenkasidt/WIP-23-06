@@ -4,7 +4,13 @@
 
 const KEY = "scheduleConfig";
 
+// Bump when the default presets change shape/meaning so saved blobs migrate.
+// v2 = scope-based presets (one schedule per static Item Master scope) replacing
+// the old room/category presets.
+export const SCHEDULE_CONFIG_VERSION = 2;
+
 export const DEFAULT_CONFIG = {
+  version: SCHEDULE_CONFIG_VERSION,
   // How many days BEFORE the planned end a task turns amber ("due soon").
   amberWindowDays: 2,
   // Escalation ladder. A task that is `minDaysOverdue` (or more) past its
@@ -14,22 +20,32 @@ export const DEFAULT_CONFIG = {
     { minDaysOverdue: 3, role: "Project Manager" },
     { minDaysOverdue: 6, role: "Studio Head" },
   ],
-  // Room / category presets. Each carries a default duration (days) that
-  // auto-fills the proposal scope / schedule when the category is picked.
+  // Scope presets. The Schedule Master is scope-based: one schedule per static
+  // scope (work item) from the Item Master, each carrying its default duration
+  // (days) that auto-fills the proposal scope / schedule when the scope is
+  // picked. Kept under the `rooms` key so existing consumers stay unchanged.
+  // Mirrors the static scopes in `DEFAULT_LIBRARY` (data/itemLibrary.js).
   rooms: [
-    { name: "Living Room", days: 20 },
-    { name: "Dining", days: 10 },
-    { name: "Kitchen", days: 15 },
-    { name: "Utility", days: 5 },
-    { name: "Master Bedroom", days: 12 },
-    { name: "Bedroom 2", days: 10 },
-    { name: "Bedroom 3", days: 10 },
-    { name: "Bathrooms", days: 6 },
-    { name: "Foyer", days: 5 },
-    { name: "Staircase", days: 6 },
-    { name: "Balcony", days: 4 },
-    { name: "Pooja Room", days: 4 },
-    { name: "Study", days: 8 },
+    { name: "False Ceiling — gypsum board with cove groove", days: 4 },
+    { name: "TV Unit — paneling with storage", days: 5 },
+    { name: "Accent Wall Paneling — veneer / laminate", days: 3 },
+    { name: "Cove / Profile Lighting", days: 2 },
+    { name: "Crockery Unit — glass shutters + lighting", days: 5 },
+    { name: "Modular Kitchen Base Unit", days: 6 },
+    { name: "Modular Kitchen Wall Unit", days: 5 },
+    { name: "Kitchen Counter — granite / quartz", days: 2 },
+    { name: "Wardrobe — laminate, soft-close", days: 6 },
+    { name: "Wardrobe — premium veneer finish", days: 6 },
+    { name: "Bed Back Panel — upholstered", days: 4 },
+    { name: "Dresser Unit — with mirror", days: 3 },
+    { name: "Study / Work Desk — built-in", days: 4 },
+    { name: "Shoe Rack — with bench top", days: 3 },
+    { name: "Bathroom Vanity — marine ply + counter", days: 3 },
+    { name: "Shower Glass Partition — 8mm toughened", days: 2 },
+    { name: "Foyer Console — with mirror", days: 2 },
+    { name: "Wall Mirror Panel", days: 1 },
+    { name: "Site Supervision & Project Management", days: 0 },
+    { name: "Design & 3D Visualization", days: 0 },
   ],
   // Task status options.
   statuses: ["Not Started", "In Progress", "Done", "Blocked"],
@@ -52,8 +68,14 @@ export function getScheduleConfig() {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return DEFAULT_CONFIG;
+    const saved = JSON.parse(raw);
     // Merge over defaults so a partial/old saved blob never drops keys.
-    const merged = { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
+    const merged = { ...DEFAULT_CONFIG, ...saved };
+    // Migrate pre-v2 (room/category-based) configs to the scope-based presets.
+    if ((Number(saved.version) || 0) < SCHEDULE_CONFIG_VERSION) {
+      merged.rooms = DEFAULT_CONFIG.rooms;
+      merged.version = SCHEDULE_CONFIG_VERSION;
+    }
     merged.rooms = normalizeRooms(merged.rooms);
     return merged;
   } catch {

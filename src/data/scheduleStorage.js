@@ -116,8 +116,15 @@ export function getOrSeedSchedule(lead) {
 }
 
 // ── Working-day math ─────────────────────────────────────────────────────────
-// Only Sunday is off; Saturday is a working day.
-const isNonWorkingDay = (d) => d.getDay() === 0;
+// Every day counts — Sundays are now included in schedule calculations.
+const isNonWorkingDay = () => false;
+
+// Work now runs on a SHIFT basis — 3 shifts per calendar day. A room's `days`
+// value is the work content in shift-units; with 3 shifts worked each day it
+// takes ceil(days / 3) calendar days on the timeline.
+export const SHIFTS_PER_DAY = 3;
+const shiftsToCalendarDays = (shifts) =>
+  Math.max(0, Math.ceil((Number(shifts) || 0) / SHIFTS_PER_DAY));
 
 function nextWorkingDay(date) {
   const d = new Date(date);
@@ -126,7 +133,7 @@ function nextWorkingDay(date) {
   return d;
 }
 
-// Advance `n` working days from `date` (weekends skipped).
+// Advance `n` working days from `date` (Sundays included — every day counts).
 function addWorkingDays(date, n) {
   const d = new Date(date);
   d.setHours(0, 0, 0, 0);
@@ -154,7 +161,7 @@ function workingDaysInclusive(from, to) {
   return count;
 }
 
-// Date that is `n` working days from `fromDate` (Sundays skipped), as an ISO
+// Date that is `n` working days from `fromDate` (Sundays included), as an ISO
 // "YYYY-MM-DD" string. Returns "" for a non-positive/invalid count. Local-time
 // formatting (not toISOString) so the date doesn't shift across timezones.
 export function addWorkingDaysISO(fromDate, n) {
@@ -207,10 +214,13 @@ export function computeChain(rooms, anchorDate) {
   if (!anchorDate) return rooms.map((r) => ({ ...r, start: null, end: null }));
   const start0 = nextWorkingDay(anchorDate);
   return rooms.map((r) => {
-    const days = Math.max(0, Number(r.days) || 0);
-    if (days <= 0) return { ...r, start: null, end: null };
+    // `days` is the work content in shift-units; convert to calendar days at
+    // SHIFTS_PER_DAY shifts/day to lay the room out on the timeline.
+    const calendarDays = shiftsToCalendarDays(r.days);
+    if (calendarDays <= 0) return { ...r, start: null, end: null };
     const start = new Date(start0);
-    const end = days > 1 ? addWorkingDays(start, days - 1) : new Date(start);
+    const end =
+      calendarDays > 1 ? addWorkingDays(start, calendarDays - 1) : new Date(start);
     return { ...r, start, end };
   });
 }

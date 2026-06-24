@@ -420,6 +420,12 @@ const ProposalMaster = () => {
   const isGroupOpen = (room) => expandedGroups[room] !== false; // default open
 
   const openAddScope = () => {
+    // Block adding scope to a configuration that has no property type — that's
+    // what produced "empty type" rows and the un-interpolated preset label.
+    if (!activeConfig?.propertyType?.trim()) {
+      showToast("Select a property type before adding scope items.", "error");
+      return;
+    }
     setEditingScopeIdx(null);
     setScopeFormOpen(true);
   };
@@ -570,14 +576,21 @@ const ProposalMaster = () => {
     }));
   };
 
-  // Automatically update the preset label based on key and active config property type
+  // Automatically update the preset label based on key and active config property
+  // type. When there is no property type, fall back to the formatted key alone so
+  // a raw, un-interpolated template label (e.g. "1 BHK ${propertyTypes[0]}") or an
+  // empty label never shows.
   useEffect(() => {
-    if (active && activeConfig?.propertyType) {
-      const formattedKey = activeKey.replace(/^(\d+)(BHK)$/i, "$1 BHK");
-      const generatedLabel = `${formattedKey} / ${activeConfig.propertyType}`;
-      if (active.label !== generatedLabel) {
-        updateActive({ label: generatedLabel });
-      }
+    if (!active) return;
+    const formattedKey = activeKey.replace(/^(\d+)(BHK)$/i, "$1 BHK");
+    let generatedLabel = null;
+    if (activeConfig?.propertyType?.trim()) {
+      generatedLabel = `${formattedKey} / ${activeConfig.propertyType}`;
+    } else if (!active.label || active.label.includes("${")) {
+      generatedLabel = formattedKey;
+    }
+    if (generatedLabel && active.label !== generatedLabel) {
+      updateActive({ label: generatedLabel });
     }
   }, [activeKey, activeConfig?.propertyType, active]);
 
@@ -1937,7 +1950,13 @@ const ProposalMaster = () => {
                   <button
                     type="button"
                     onClick={openAddScope}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-linear-to-br from-select-blue to-primary text-white text-[11px] font-semibold hover:shadow-md hover:shadow-select-blue/20 shadow-sm transition-all"
+                    disabled={!activeConfig?.propertyType?.trim()}
+                    title={
+                      !activeConfig?.propertyType?.trim()
+                        ? "Select a property type first"
+                        : "Add a scope item"
+                    }
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-linear-to-br from-select-blue to-primary text-white text-[11px] font-semibold hover:shadow-md hover:shadow-select-blue/20 shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <Plus size={12} /> Add Scope
                   </button>
@@ -2285,7 +2304,13 @@ const ProposalMaster = () => {
                     <button
                       type="button"
                       onClick={openAddScope}
-                      className="mt-4 inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-linear-to-br from-select-blue to-primary text-white text-[11.5px] font-semibold shadow-md shadow-select-blue/20 hover:shadow-lg transition-all"
+                      disabled={!activeConfig?.propertyType?.trim()}
+                      title={
+                        !activeConfig?.propertyType?.trim()
+                          ? "Select a property type first"
+                          : "Add a blank scope item"
+                      }
+                      className="mt-4 inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-linear-to-br from-select-blue to-primary text-white text-[11.5px] font-semibold shadow-md shadow-select-blue/20 hover:shadow-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       <Plus size={13} /> Add Blank Scope
                     </button>

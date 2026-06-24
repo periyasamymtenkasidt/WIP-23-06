@@ -169,7 +169,7 @@ const Login = () => {
               />
               <div className="flex flex-col leading-none border-l border-paleorange/40 pl-3">
                 <p className="text-[9px] uppercase tracking-[0.4em] text-dark-yellow font-bold leading-none">
-                  {loginType === "admin" ? "Architecture" : "Client Portal"}
+                  Architecture
                 </p>
                 <p className="text-[9px] uppercase tracking-[0.4em] text-text-subtle font-semibold mt-1.5 leading-none">
                   Interiors · Chennai
@@ -211,7 +211,7 @@ const Login = () => {
               <p className="text-[14px] text-text-muted leading-relaxed">
                 {loginType === "admin"
                   ? "Enter your credentials to access your studio dashboard."
-                  : "Log in to view project milestones, 3D renders, drawings, and pay invoices."}
+                  : "Enter your credentials to access your Workspace."}
               </p>
             </div>
 
@@ -328,13 +328,35 @@ const Login = () => {
               </>
             ) : (
               <>
+                {/* Google Button */}
+                <button
+                  type="button"
+                  className="w-full flex items-center justify-center gap-1 bg-white border border-x-3 border-y-0 rounded-full py-3 text-[14px] font-semibold text-textcolor hover:bg-gray-50 transition-all mb-6 shadow-sm"
+                >
+                  <img
+                    src={Google}
+                    alt="Google"
+                    className="w-7 h-7 object-contain"
+                  />
+                  Continue with Google
+                </button>
+
+                {/* Divider */}
+                <div className="flex items-center gap-4 mb-6 w-full">
+                  <div className="flex-1 h-px bg-border"></div>
+                  <span className="text-[10px] font-bold text-text-subtle uppercase tracking-widest leading-none">
+                    Or Login With Email
+                  </span>
+                  <div className="flex-1 h-px bg-border"></div>
+                </div>
+
                 {/* Client Form */}
                 <form onSubmit={handleSubmitClient(onSubmitClient)} className="space-y-4">
                   <InputField
-                    label="Client Registered Email"
+                    label="Email Address"
                     name="email"
                     type="email"
-                    placeholder="name@gmail.com"
+                    placeholder="name@atelier.com"
                     register={registerClient("email")}
                     error={errorsClient.email?.message}
                     variant="auth"
@@ -361,32 +383,36 @@ const Login = () => {
                         </button>
                       }
                     />
-                    <div className="flex justify-between items-center pt-1 px-1">
-                      <label className="flex items-center gap-2 cursor-pointer group">
-                        <div className="relative flex items-center justify-center">
-                          <input
-                            type="checkbox"
-                            checked={keepSigned}
-                            onChange={(e) => setKeepSigned(e.target.checked)}
-                            className="peer appearance-none w-4 h-4 border border-placeholder rounded-[4px] checked:bg-purple checked:border-purple transition-all bg-white"
-                          />
-                          <Check
-                            className="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 transition-opacity pointer-events-none"
-                            strokeWidth={4}
-                          />
-                        </div>
-                        <span className="text-[12px] font-semibold text-text-muted select-none">
-                          Remember me
-                        </span>
-                      </label>
+                    <div className="flex justify-end pt-1">
                       <button
                         type="button"
                         onClick={() => navigate("/client/forgot-password")}
-                        className="text-[12px] font-bold text-grey hover:text-purple cursor-pointer"
+                        className="text-[12px] font-semibold text-grey hover:text-purple cursor-pointer"
                       >
                         Forgot password?
                       </button>
                     </div>
+                  </div>
+
+                  {/* Keep signed in */}
+                  <div className="pt-1 pb-1">
+                    <label className="flex items-center gap-2.5 cursor-pointer w-fit group">
+                      <div className="relative flex items-center justify-center">
+                        <input
+                          type="checkbox"
+                          checked={keepSigned}
+                          onChange={(e) => setKeepSigned(e.target.checked)}
+                          className="peer appearance-none w-4 h-4 border border-placeholder rounded-[4px] checked:bg-purple checked:border-purple transition-all bg-white"
+                        />
+                        <Check
+                          className="absolute w-3 h-3 text-white opacity-0 peer-checked:opacity-100 transition-opacity pointer-events-none"
+                          strokeWidth={4}
+                        />
+                      </div>
+                      <span className="text-[13px] font-semibold text-text-muted select-none">
+                        Keep me signed in
+                      </span>
+                    </label>
                   </div>
 
                   {/* Submit Button */}
@@ -400,33 +426,9 @@ const Login = () => {
                     }`}
                   >
                     {loading && <Loader2 className="animate-spin h-5 w-5" />}
-                    <span>{loading ? "Verifying access..." : "Access Portal"}</span>
+                    <span>{loading ? "Signing in..." : "Sign In"}</span>
                   </button>
                 </form>
-
-                {/* Quick Demo Clients Select */}
-                <div className="mt-6 border-t border-border/60 pt-5">
-                  <p className="text-[10px] uppercase font-bold tracking-widest text-text-subtle mb-3 text-center">
-                    Demo Accounts for Testing
-                  </p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {activeClients.slice(0, 2).map((c) => (
-                      <button
-                        key={c.clientID}
-                        type="button"
-                        onClick={() => handleSelectDemo(c)}
-                        className="p-2.5 rounded-2xl bg-white border border-border/60 hover:border-paleorange hover:bg-palewhite transition-all text-left flex flex-col justify-between cursor-pointer group shadow-sm"
-                      >
-                        <span className="text-[11.5px] font-bold text-darkgray group-hover:text-purple truncate w-full">
-                          {c.clientName}
-                        </span>
-                        <span className="text-[9.5px] text-text-muted truncate w-full mt-0.5">
-                          {c.clientEmail}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
               </>
             )}
           </div>

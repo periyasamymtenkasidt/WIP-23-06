@@ -78,7 +78,10 @@ export default function ClientForgotPassword() {
               onClick={() => navigate("/client/login")}
               className="mb-6 flex items-center gap-1.5 text-[12px] font-bold text-grey hover:text-purple transition-colors cursor-pointer group"
             >
-              <ArrowLeft size={14} className="group-hover:-translate-x-0.5 transition-transform" />
+              <ArrowLeft
+                size={14}
+                className="group-hover:-translate-x-0.5 transition-transform"
+              />
               Back to Client Login
             </button>
 
@@ -89,7 +92,8 @@ export default function ClientForgotPassword() {
               </h1>
               <p className="text-[14.5px] text-text-muted">
                 Enter your client email and we'll send you
-                <br className="hidden sm:block" />a link to restore your portal password.
+                <br className="hidden sm:block" />a link to restore your portal
+                password.
               </p>
             </div>
 

@@ -13,7 +13,7 @@ import NotFound from "../pages/NotFound";
 import VendorQuoteForm from "../pages/procurement/VendorQuoteForm";
 
 // Client Portal eagerly loaded routes
-import ClientForgotPassword from "../pages/auth/ClientForgotPassword";
+import ClientForgotPassword from "../clientportal/auth/ClientForgotPassword";
 import ClientDashboard from "../pages/clients/ClientDashboard";
 import ClientProtectedRoute from "./ClientProtectedRoute";
 
@@ -42,14 +42,16 @@ const Settings = lazy(() => import("../pages/settings/Settings"));
 const BOQEditor = lazy(() => import("../pages/boq/BOQEditor"));
 
 // Client Portal Eagerly Loaded Routes
-const ClientPortalLayout = lazy(() => import("../layouts/ClientPortalLayout"));
-const PortalDashboard = lazy(() => import("../pages/clients/portal/PortalDashboard"));
-const PaymentMilestones = lazy(() => import("../pages/clients/portal/PaymentMilestones"));
-const ProjectQuotes = lazy(() => import("../pages/clients/portal/ProjectQuotes"));
-const SiteVisitsCalendar = lazy(() => import("../pages/clients/portal/SiteVisitsCalendar"));
-const DesignsRenders = lazy(() => import("../pages/clients/portal/DesignsRenders"));
-const SupportChat = lazy(() => import("../pages/clients/portal/SupportChat"));
-const GSTInvoice = lazy(() => import("../pages/clients/portal/GSTInvoice"));
+const ClientPortalLayout = lazy(() => import("../clientportal/layouts/MainLayout"));
+const PortalDashboard = lazy(() => import("../clientportal/pages/PortalDashboard"));
+const PaymentMilestones = lazy(() => import("../clientportal/pages/PaymentMilestones"));
+const ProjectQuotes = lazy(() => import("../clientportal/pages/ProjectQuotes"));
+const SiteVisitsCalendar = lazy(() => import("../clientportal/pages/SiteVisitsCalendar"));
+const DesignsRenders = lazy(() => import("../clientportal/pages/DesignsRenders"));
+const SupportChat = lazy(() => import("../clientportal/pages/SupportChat"));
+const GSTInvoice = lazy(() => import("../clientportal/pages/GSTInvoice"));
+const ClientProfilePage = lazy(() => import("../clientportal/pages/ClientProfilePage"));
+const ClientSignout = lazy(() => import("../clientportal/pages/ClientSignout"));
 
 const LoadingFallback = () => (
   <div className="flex justify-center items-center h-screen">
@@ -130,6 +132,8 @@ const AppRoutes = () => {
               <Route path="designs-renders" element={<DesignsRenders />} />
               <Route path="support-chat" element={<SupportChat />} />
               <Route path="gst-invoice" element={<GSTInvoice />} />
+              <Route path="profile" element={<ClientProfilePage />} />
+              <Route path="signout" element={<ClientSignout />} />
             </Route>
           </Route>
         </Routes>

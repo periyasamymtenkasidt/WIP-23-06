@@ -1,6 +1,15 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Mail, Lock, Eye, EyeOff, Loader2, Check, ArrowLeft, ArrowRight } from "lucide-react";
+import {
+  Mail,
+  Lock,
+  Eye,
+  EyeOff,
+  Loader2,
+  Check,
+  ArrowLeft,
+  ArrowRight,
+} from "lucide-react";
 import { useForm } from "react-hook-form";
 import { yupResolver } from "@hookform/resolvers/yup";
 import * as yup from "yup";
@@ -55,10 +64,10 @@ const ClientLogin = () => {
   const onSubmit = (data) => {
     setLoading(true);
     setLoginError("");
-    
+
     setTimeout(() => {
       const foundClient = activeClients.find(
-        (c) => c.clientEmail.toLowerCase() === data.email.toLowerCase()
+        (c) => c.clientEmail.toLowerCase() === data.email.toLowerCase(),
       );
 
       if (foundClient) {
@@ -68,7 +77,7 @@ const ClientLogin = () => {
       } else {
         setLoading(false);
         setLoginError(
-          "We couldn't find a client matching this email address. Please click one of the quick-login client cards below."
+          "We couldn't find a client matching this email address. Please click one of the quick-login client cards below.",
         );
       }
     }, 1200);
@@ -98,7 +107,10 @@ const ClientLogin = () => {
               onClick={() => navigate("/")}
               className="mb-5 flex items-center gap-1.5 text-[12px] font-bold text-grey hover:text-purple transition-colors cursor-pointer group"
             >
-              <ArrowLeft size={14} className="group-hover:-translate-x-0.5 transition-transform" />
+              <ArrowLeft
+                size={14}
+                className="group-hover:-translate-x-0.5 transition-transform"
+              />
               Go back to Studio Portal
             </button>
 
@@ -129,7 +141,8 @@ const ClientLogin = () => {
                 Your Workspace
               </h1>
               <p className="text-[13.5px] text-text-muted leading-relaxed">
-                Log in to view project milestones, 3D renders, drawings, and pay invoices.
+                Log in to view project milestones, 3D renders, drawings, and pay
+                invoices.
               </p>
             </div>
 

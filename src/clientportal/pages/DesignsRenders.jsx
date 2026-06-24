@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { getFile, storeFile } from "../../../utils/fileStorage";
+import { getFile, storeFile } from "../../utils/fileStorage";
 import { useOutletContext, useNavigate } from "react-router-dom";
-import PortalStageApproval from "./PortalStageApproval";
+import PortalStageApproval from "../pages/PortalStageApproval";
 import { 
   CheckCircle2, 
   Clock, 

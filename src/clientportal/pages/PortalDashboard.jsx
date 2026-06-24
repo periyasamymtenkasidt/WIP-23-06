@@ -36,7 +36,6 @@ const PortalDashboard = () => {
 
   // Determine client pending action
   const getPendingAction = (s) => {
-    
     if (!s) return "None";
     if (s.approvalStatus === "Sent" || s.approvalStatus === "Viewed") {
       return "Review Approval Package";

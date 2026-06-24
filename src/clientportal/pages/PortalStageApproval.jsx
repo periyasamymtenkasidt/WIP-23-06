@@ -8,7 +8,7 @@ import {
   ThumbsUp,
   Download,
 } from "lucide-react";
-import { getFile } from "../../../utils/fileStorage";
+import { getFile } from "../../utils/fileStorage";
 import {
   getPipeline,
   getDesignFlow,
@@ -17,7 +17,7 @@ import {
   requestRevision,
   isStageBillable,
   tenderEstimate,
-} from "../../../data/designFlowStorage";
+} from "../../data/designFlowStorage";
 
 const inr = (n) => `₹${Math.round(Number(n) || 0).toLocaleString("en-IN")}`;
 

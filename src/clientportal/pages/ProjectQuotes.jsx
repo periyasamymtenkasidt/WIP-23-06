@@ -1,8 +1,8 @@
 import React, { useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { FileText, Printer } from "lucide-react";
-import QuotePreviewModal from "../../../components/QuotePreviewModal";
-import { getQuotesForParent } from "../../../data/QuotePresets";
+import QuotePreviewModal from "../../components/QuotePreviewModal";
+import { getQuotesForParent } from "../../data/QuotePresets";
 
 const ProjectQuotes = () => {
   const { client, formatAmount } = useOutletContext();

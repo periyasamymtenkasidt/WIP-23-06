@@ -42,7 +42,7 @@ const MAT_FOYER = [
 
 export const DEFAULT_PRESETS = {
   "1BHK": {
-    label: "1 BHK ${propertyTypes[0]}",
+    label: "1 BHK Apartment",
     propertyType: "Apartment",
     propertyTypes: ["Apartment", "Studio Apartment"],
     sizeRange: "450-600",

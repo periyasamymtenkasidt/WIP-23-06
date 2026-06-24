@@ -39,7 +39,11 @@ import {
   getNonDefaultTermStrings,
 } from "../data/termsStorage";
 
-import { cleanSizeRange, validateSizeRangeInput, formatSizeRange } from "../utils/sizeRangeValidation";
+import {
+  cleanSizeRange,
+  validateSizeRangeInput,
+  formatSizeRange,
+} from "../utils/sizeRangeValidation";
 
 const quoteRecipientSchema = yup.object().shape({
   recipientName: yup.string().trim(),
@@ -48,19 +52,14 @@ const quoteRecipientSchema = yup.object().shape({
     .required("Email Address is required")
     .trim()
     .matches(/^[^\s@]+@[^\s@]+\.[^\s@]+$/, "Enter a valid email address"),
-  sizeRange: yup
-    .string()
-    .test(
-      "isValidSizeRange",
-      function (value) {
-        if (!value) return true;
-        const errMsg = validateSizeRangeInput(value);
-        if (errMsg) {
-          return this.createError({ message: errMsg });
-        }
-        return true;
-      }
-    ),
+  sizeRange: yup.string().test("isValidSizeRange", function (value) {
+    if (!value) return true;
+    const errMsg = validateSizeRangeInput(value);
+    if (errMsg) {
+      return this.createError({ message: errMsg });
+    }
+    return true;
+  }),
 });
 import QuotePreview from "./QuotePreview";
 import {
@@ -378,28 +377,40 @@ const buildInitialFormData = ({
   // Load scope items: prefer initialQuote's saved scopeItems, then presetData's scopeItems,
   // and fallback to the master config configuration.
   let scopeItems = initialQuote?.scopeItems
-    ? initialQuote.scopeItems.map((s) => normalizeScopeItem({
-        ...s,
-        materials: s.materials ? s.materials.map((m) => ({ ...m })) : [],
-      }))
+    ? initialQuote.scopeItems.map((s) =>
+        normalizeScopeItem({
+          ...s,
+          materials: s.materials ? s.materials.map((m) => ({ ...m })) : [],
+        }),
+      )
     : presetData?.scopeItems
-      ? presetData.scopeItems.map((s) => normalizeScopeItem({
-          ...s,
-          materials: s.materials ? s.materials.map((m) => ({ ...m })) : [],
-        }))
-      : (cfg.scopeItems || []).map((s) => normalizeScopeItem({
-          ...s,
-          materials: s.materials ? s.materials.map((m) => ({ ...m })) : [],
-        }));
+      ? presetData.scopeItems.map((s) =>
+          normalizeScopeItem({
+            ...s,
+            materials: s.materials ? s.materials.map((m) => ({ ...m })) : [],
+          }),
+        )
+      : (cfg.scopeItems || []).map((s) =>
+          normalizeScopeItem({
+            ...s,
+            materials: s.materials ? s.materials.map((m) => ({ ...m })) : [],
+          }),
+        );
 
-  scopeItems = refreshScopeItemsFromMaster(scopeItems, activePresetKey, activePropertyType);
+  scopeItems = refreshScopeItemsFromMaster(
+    scopeItems,
+    activePresetKey,
+    activePropertyType,
+  );
   const activeGrade =
     initialQuote?.grade || presetData?.grade || cfg.grade || "premium";
   // Preserve an already-sent quote exactly on resend. New proposal/sample data
   // gets each scope mapped to its OWN grade (grade is chosen per scope item),
   // falling back to the preset grade for any item without one.
   if (!initialQuote) {
-    scopeItems = scopeItems.map((s) => mapScopeItemToGrade(s, s.grade || activeGrade));
+    scopeItems = scopeItems.map((s) =>
+      mapScopeItemToGrade(s, s.grade || activeGrade),
+    );
   }
 
   // Load inclusions/exclusions per category with legacy support
@@ -411,20 +422,28 @@ const buildInitialFormData = ({
 
   categoriesList.forEach((cat) => {
     const global = getGlobalTerms(cat);
-    const defaultIn = global.inclusions.filter((t) => t.isDefault).map((t) => t.text);
-    const defaultEx = global.exclusions.filter((t) => t.isDefault).map((t) => t.text);
+    const defaultIn = global.inclusions
+      .filter((t) => t.isDefault)
+      .map((t) => t.text);
+    const defaultEx = global.exclusions
+      .filter((t) => t.isDefault)
+      .map((t) => t.text);
 
     if (initialQuote?.categoryInclusions?.[cat]) {
       categoryInclusions[cat] = [...initialQuote.categoryInclusions[cat]];
     } else {
       if (initialQuote?.inclusions) {
         const catGlobalIntexts = global.inclusions.map((t) => t.text);
-        categoryInclusions[cat] = initialQuote.inclusions.filter((text) => catGlobalIntexts.includes(text));
+        categoryInclusions[cat] = initialQuote.inclusions.filter((text) =>
+          catGlobalIntexts.includes(text),
+        );
       } else if (presetData?.categoryInclusions?.[cat]) {
         categoryInclusions[cat] = [...presetData.categoryInclusions[cat]];
       } else if (presetData?.inclusions) {
         const catGlobalIntexts = global.inclusions.map((t) => t.text);
-        categoryInclusions[cat] = presetData.inclusions.filter((text) => catGlobalIntexts.includes(text));
+        categoryInclusions[cat] = presetData.inclusions.filter((text) =>
+          catGlobalIntexts.includes(text),
+        );
       } else {
         categoryInclusions[cat] = defaultIn;
       }
@@ -435,12 +454,16 @@ const buildInitialFormData = ({
     } else {
       if (initialQuote?.exclusions) {
         const catGlobalExtexts = global.exclusions.map((t) => t.text);
-        categoryExclusions[cat] = initialQuote.exclusions.filter((text) => catGlobalExtexts.includes(text));
+        categoryExclusions[cat] = initialQuote.exclusions.filter((text) =>
+          catGlobalExtexts.includes(text),
+        );
       } else if (presetData?.categoryExclusions?.[cat]) {
         categoryExclusions[cat] = [...presetData.categoryExclusions[cat]];
       } else if (presetData?.exclusions) {
         const catGlobalExtexts = global.exclusions.map((t) => t.text);
-        categoryExclusions[cat] = presetData.exclusions.filter((text) => catGlobalExtexts.includes(text));
+        categoryExclusions[cat] = presetData.exclusions.filter((text) =>
+          catGlobalExtexts.includes(text),
+        );
       } else {
         categoryExclusions[cat] = defaultEx;
       }
@@ -453,7 +476,9 @@ const buildInitialFormData = ({
       addedInclusions[cat] = [...presetData.addedInclusions[cat]];
     } else {
       const currentIn = categoryInclusions[cat] || [];
-      addedInclusions[cat] = currentIn.filter((item) => !defaultIn.includes(item));
+      addedInclusions[cat] = currentIn.filter(
+        (item) => !defaultIn.includes(item),
+      );
     }
 
     if (initialQuote?.addedExclusions?.[cat]) {
@@ -462,7 +487,9 @@ const buildInitialFormData = ({
       addedExclusions[cat] = [...presetData.addedExclusions[cat]];
     } else {
       const currentEx = categoryExclusions[cat] || [];
-      addedExclusions[cat] = currentEx.filter((item) => !defaultEx.includes(item));
+      addedExclusions[cat] = currentEx.filter(
+        (item) => !defaultEx.includes(item),
+      );
     }
   });
 
@@ -482,7 +509,7 @@ const buildInitialFormData = ({
     propertyType: activePropertyType,
     grade: activeGrade,
     sizeRange: cleanSizeRange(
-      presetData?.sizeRange || cfg.sizeRange || initialQuote?.sizeRange || ""
+      presetData?.sizeRange || cfg.sizeRange || initialQuote?.sizeRange || "",
     ),
     validityDays: presetData?.validityDays || initialQuote?.validityDays || 30,
     scopeItems,
@@ -585,7 +612,10 @@ const QuoteModal = ({
   const handleDeleteGroup = (roomName) => {
     setFormData((p) => ({
       ...p,
-      scopeItems: p.scopeItems.filter((s) => (s.area || "").trim().toUpperCase() !== roomName.trim().toUpperCase()),
+      scopeItems: p.scopeItems.filter(
+        (s) =>
+          (s.area || "").trim().toUpperCase() !== roomName.trim().toUpperCase(),
+      ),
     }));
     setDeleteGroupConfirm(null);
     showToast(`Deleted "${roomName}" group`, "info");
@@ -606,21 +636,34 @@ const QuoteModal = ({
       const resolvedCategory = category || getCategoryFromItemName(itemName);
 
       // Get ALL headings from the Proposal rooms list (all room presets)
-      const scheduleHeadingNames = getProposalRoomPresets().map((r) => r.name.trim().toUpperCase());
+      const scheduleHeadingNames = getProposalRoomPresets().map((r) =>
+        r.name.trim().toUpperCase(),
+      );
 
       // Collect ALL existing headings from scope items (not filtered by category)
       const existingHeadings = Array.from(
-        new Set(scopeItems.map((item) => (item.area || item.heading || "Unassigned").trim().toUpperCase()))
+        new Set(
+          scopeItems.map((item) =>
+            (item.area || item.heading || "Unassigned").trim().toUpperCase(),
+          ),
+        ),
       );
 
       // Combine and deduplicate
-      const allHeadings = Array.from(new Set([...scheduleHeadingNames, ...existingHeadings]));
+      const allHeadings = Array.from(
+        new Set([...scheduleHeadingNames, ...existingHeadings]),
+      );
 
       // Informational only — not used to hide headings
       const headingsWithItem = scopeItems
-        .filter((item) => (item.itemName || "").trim().toLowerCase() === itemName.trim().toLowerCase())
-        .map((item) => (item.area || item.heading || "Unassigned").trim().toUpperCase());
-
+        .filter(
+          (item) =>
+            (item.itemName || "").trim().toLowerCase() ===
+            itemName.trim().toLowerCase(),
+        )
+        .map((item) =>
+          (item.area || item.heading || "Unassigned").trim().toUpperCase(),
+        );
 
       setDestPrompt({
         isOpen: true,
@@ -779,7 +822,7 @@ const QuoteModal = ({
     setPresetKey(key);
     const cfg = getConfigForType(key);
     if (!cfg) return;
-    
+
     const categoryInclusions = {};
     const categoryExclusions = {};
     const addedInclusions = {};
@@ -787,8 +830,12 @@ const QuoteModal = ({
     const categoriesList = getCategoriesList();
     categoriesList.forEach((cat) => {
       const global = getGlobalTerms(cat);
-      categoryInclusions[cat] = global.inclusions.filter((t) => t.isDefault).map((t) => t.text);
-      categoryExclusions[cat] = global.exclusions.filter((t) => t.isDefault).map((t) => t.text);
+      categoryInclusions[cat] = global.inclusions
+        .filter((t) => t.isDefault)
+        .map((t) => t.text);
+      categoryExclusions[cat] = global.exclusions
+        .filter((t) => t.isDefault)
+        .map((t) => t.text);
       addedInclusions[cat] = [];
       addedExclusions[cat] = [];
     });
@@ -799,16 +846,20 @@ const QuoteModal = ({
       flatEx.push(...(categoryExclusions[cat] || []));
     });
 
-    rhfSetValue("sizeRange", cleanSizeRange(cfg.sizeRange), { shouldValidate: true });
+    rhfSetValue("sizeRange", cleanSizeRange(cfg.sizeRange), {
+      shouldValidate: true,
+    });
     setFormData((prev) => ({
       ...prev,
       propertyType: cfg.propertyType,
       sizeRange: cleanSizeRange(cfg.sizeRange),
       scopeItems: mapScopeItemsToGrade(
-        (cfg.scopeItems || []).map((s) => normalizeScopeItem({
-          ...s,
-          materials: s.materials ? s.materials.map((m) => ({ ...m })) : [],
-        })),
+        (cfg.scopeItems || []).map((s) =>
+          normalizeScopeItem({
+            ...s,
+            materials: s.materials ? s.materials.map((m) => ({ ...m })) : [],
+          }),
+        ),
         null,
       ),
       inclusions: flatIn,
@@ -839,8 +890,12 @@ const QuoteModal = ({
     const categoriesList = getCategoriesList();
     categoriesList.forEach((cat) => {
       const global = getGlobalTerms(cat);
-      categoryInclusions[cat] = global.inclusions.filter((t) => t.isDefault).map((t) => t.text);
-      categoryExclusions[cat] = global.exclusions.filter((t) => t.isDefault).map((t) => t.text);
+      categoryInclusions[cat] = global.inclusions
+        .filter((t) => t.isDefault)
+        .map((t) => t.text);
+      categoryExclusions[cat] = global.exclusions
+        .filter((t) => t.isDefault)
+        .map((t) => t.text);
       addedInclusions[cat] = [];
       addedExclusions[cat] = [];
     });
@@ -851,16 +906,20 @@ const QuoteModal = ({
       flatEx.push(...(categoryExclusions[cat] || []));
     });
 
-    rhfSetValue("sizeRange", cleanSizeRange(cfg.sizeRange), { shouldValidate: true });
+    rhfSetValue("sizeRange", cleanSizeRange(cfg.sizeRange), {
+      shouldValidate: true,
+    });
     setFormData((prev) => ({
       ...prev,
       propertyType: cfg.propertyType,
       sizeRange: cleanSizeRange(cfg.sizeRange),
       scopeItems: mapScopeItemsToGrade(
-        (cfg.scopeItems || []).map((s) => normalizeScopeItem({
-          ...s,
-          materials: s.materials ? s.materials.map((m) => ({ ...m })) : [],
-        })),
+        (cfg.scopeItems || []).map((s) =>
+          normalizeScopeItem({
+            ...s,
+            materials: s.materials ? s.materials.map((m) => ({ ...m })) : [],
+          }),
+        ),
         null,
       ),
       inclusions: flatIn,
@@ -976,19 +1035,23 @@ const QuoteModal = ({
           if (i === idx) return false;
           return (
             (s.area || s.heading || "").trim().toUpperCase() === newHeading &&
-            (s.itemName || "").trim().toLowerCase() === (item.itemName || "").trim().toLowerCase()
+            (s.itemName || "").trim().toLowerCase() ===
+              (item.itemName || "").trim().toLowerCase()
           );
         });
 
         if (duplicateExists) {
-          showToast(`"${item.itemName}" already exists under heading "${newHeading}".`, "error");
+          showToast(
+            `"${item.itemName}" already exists under heading "${newHeading}".`,
+            "error",
+          );
           return p;
         }
       }
 
       const nextItems = p.scopeItems.map((s, i) => {
         if (i !== idx) return s;
-        
+
         let target = { ...s, [key]: value };
 
         if (key === "description") {
@@ -1000,18 +1063,23 @@ const QuoteModal = ({
         if (key === "itemName") {
           target.isItemNameCustom = true;
         }
-        
-        if (key === "length" || key === "breadth" || key === "qty" || key === "rate") {
+
+        if (
+          key === "length" ||
+          key === "breadth" ||
+          key === "qty" ||
+          key === "rate"
+        ) {
           const L = Number(target.length) || 0;
           const B = Number(target.breadth) || 0;
           target.calculatedArea = L * B;
-          
+
           const userQty = target.qty !== "" ? Number(target.qty) : 0;
           const qtyToUse = userQty > 0 ? userQty : target.calculatedArea;
           const rateToUse = Number(target.rate) || 0;
           target.amount = Math.round(qtyToUse * rateToUse);
         }
-        
+
         return target;
       });
       return { ...p, scopeItems: nextItems };
@@ -1022,7 +1090,11 @@ const QuoteModal = ({
   const handleLibraryPick = async (lib) => {
     try {
       const itemName = lib.description || "";
-      const heading = await getDestinationHeading(itemName, formData.scopeItems, lib.category);
+      const heading = await getDestinationHeading(
+        itemName,
+        formData.scopeItems,
+        lib.category,
+      );
 
       // Seed the schedule duration: prefer the item's own days, else fall back to
       // the default configured for its room category (Master → Schedule).
@@ -1150,7 +1222,9 @@ const QuoteModal = ({
       const { flushSync } = await import("react-dom");
 
       // 1. Create a temporary container directly on body
-      let printContainer = document.getElementById("quote-print-temp-container");
+      let printContainer = document.getElementById(
+        "quote-print-temp-container",
+      );
       if (!printContainer) {
         printContainer = document.createElement("div");
         printContainer.id = "quote-print-temp-container";
@@ -1171,7 +1245,7 @@ const QuoteModal = ({
       const cleanup = () => {
         if (cleaned) return;
         cleaned = true;
-        
+
         try {
           document.body.classList.remove("printing-quote-mode");
         } catch (e) {}
@@ -1195,7 +1269,10 @@ const QuoteModal = ({
       // 6. Synchronous fallback: run cleanup immediately after print dialog returns (blocking call)
       cleanup();
     } catch (err) {
-      console.error("[QuoteModal] print failed, falling back to basic print:", err);
+      console.error(
+        "[QuoteModal] print failed, falling back to basic print:",
+        err,
+      );
       window.print();
     }
   };
@@ -1224,33 +1301,33 @@ const QuoteModal = ({
 
     setIsSending(true);
     try {
-    await new Promise((r) => setTimeout(r, 600));
-    const sentAt = new Date().toISOString();
-    const subjectPrefix = isProposal
-      ? isResend
-        ? "Revised proposal"
-        : "Proposal"
-      : "Quote";
-    const subject = `${subjectPrefix} ${formData.quoteId} for your project — ${parentId}`;
-    const body = `Hi ${formData.recipientName},\n\nPlease find attached our ${subjectPrefix.toLowerCase()} ${formData.quoteId} for your ${formData.propertyType} (${formData.sizeRange}). The grand total is ${formatAmount(totals.grandTotal)} (incl. GST). This quote is valid for ${formData.validityDays} days.\n\nLooking forward to your feedback.\n\n— Digital Atelier`;
-    void body;
-    const emailBody = `Hi ${recipientName},\n\nPlease find attached our ${subjectPrefix.toLowerCase()} ${formData.quoteId} for your ${formData.propertyType} (${sizeRange}). The grand total is ${formatAmount(totals.grandTotal)} (incl. GST). This quote is valid for ${formData.validityDays} days.\n\nLooking forward to your feedback.\n\n- Digital Atelier`;
-    const quote = buildQuote({
-      recipientName,
-      recipientEmail,
-      sizeRange,
-      status: "sent",
-      sentAt,
-      subject,
-      body: emailBody,
-    });
-    saveQuote(parentId, quote);
-    setFormData((p) => ({
-      ...p,
-      recipientName,
-      recipientEmail,
-      sizeRange,
-    }));
+      await new Promise((r) => setTimeout(r, 600));
+      const sentAt = new Date().toISOString();
+      const subjectPrefix = isProposal
+        ? isResend
+          ? "Revised proposal"
+          : "Proposal"
+        : "Quote";
+      const subject = `${subjectPrefix} ${formData.quoteId} for your project — ${parentId}`;
+      const body = `Hi ${formData.recipientName},\n\nPlease find attached our ${subjectPrefix.toLowerCase()} ${formData.quoteId} for your ${formData.propertyType} (${formData.sizeRange}). The grand total is ${formatAmount(totals.grandTotal)} (incl. GST). This quote is valid for ${formData.validityDays} days.\n\nLooking forward to your feedback.\n\n— Digital Atelier`;
+      void body;
+      const emailBody = `Hi ${recipientName},\n\nPlease find attached our ${subjectPrefix.toLowerCase()} ${formData.quoteId} for your ${formData.propertyType} (${sizeRange}). The grand total is ${formatAmount(totals.grandTotal)} (incl. GST). This quote is valid for ${formData.validityDays} days.\n\nLooking forward to your feedback.\n\n- Digital Atelier`;
+      const quote = buildQuote({
+        recipientName,
+        recipientEmail,
+        sizeRange,
+        status: "sent",
+        sentAt,
+        subject,
+        body: emailBody,
+      });
+      saveQuote(parentId, quote);
+      setFormData((p) => ({
+        ...p,
+        recipientName,
+        recipientEmail,
+        sizeRange,
+      }));
       try {
         onSent?.({
           quoteId: quote.quoteId,
@@ -1293,7 +1370,9 @@ const QuoteModal = ({
   const gradeShorthand = (key) => {
     const label = gradeOptions.find((g) => g.key === key)?.label || key || "";
     if (!label) return "";
-    return label.charAt(0).toUpperCase() + (label.charAt(1) || "").toLowerCase();
+    return (
+      label.charAt(0).toUpperCase() + (label.charAt(1) || "").toLowerCase()
+    );
   };
   const previewQuote = (() => {
     const base = buildQuote();
@@ -1347,9 +1426,15 @@ const QuoteModal = ({
           type="button"
           onClick={rhfHandleSubmit(handleSend, handleSendInvalid)}
           disabled={isSending}
-          title={overLimit ? `Exceeds the original proposal by ${increasePct.toFixed(1)}% — over the ${MAX_INCREASE_PCT}% limit` : undefined}
+          title={
+            overLimit
+              ? `Exceeds the original proposal by ${increasePct.toFixed(1)}% — over the ${MAX_INCREASE_PCT}% limit`
+              : undefined
+          }
           className={`min-w-[180px] flex items-center justify-center gap-2 px-7 py-2.5 rounded-lg text-white text-sm font-medium shadow-sm transition-all disabled:opacity-70 disabled:cursor-not-allowed ${
-            overLimit ? "bg-red-500 hover:bg-red-600" : "bg-select-blue hover:bg-primary"
+            overLimit
+              ? "bg-red-500 hover:bg-red-600"
+              : "bg-select-blue hover:bg-primary"
           }`}
         >
           {isSending ? (
@@ -1411,7 +1496,7 @@ const QuoteModal = ({
                     {formatSizeRange(
                       formData.sizeRange ||
                         getConfigForType(presetKey, formData.propertyType)
-                          ?.sizeRange
+                          ?.sizeRange,
                     )}
                   </p>
                 </div>
@@ -1562,7 +1647,10 @@ const QuoteModal = ({
                 const roomColorObj = roomColor(group.room.split(" ")[0]);
                 const groupOpen = isGroupOpen(group.room);
                 return (
-                  <div key={group.room} className="border border-bordergray rounded-xl bg-white overflow-hidden shadow-sm">
+                  <div
+                    key={group.room}
+                    className="border border-bordergray rounded-xl bg-white overflow-hidden shadow-sm"
+                  >
                     {/* Accordion Header */}
                     <div className="w-full flex items-center justify-between px-3.5 py-2.5 bg-bg-soft/40 hover:bg-bg-soft/70 transition-colors border-b border-bordergray">
                       <button
@@ -1571,11 +1659,19 @@ const QuoteModal = ({
                         className="flex-1 flex items-center gap-2 min-w-0 text-left cursor-pointer focus:outline-none"
                       >
                         {groupOpen ? (
-                          <ChevronDown size={13} className="text-text-muted shrink-0" />
+                          <ChevronDown
+                            size={13}
+                            className="text-text-muted shrink-0"
+                          />
                         ) : (
-                          <ChevronRight size={13} className="text-text-muted shrink-0" />
+                          <ChevronRight
+                            size={13}
+                            className="text-text-muted shrink-0"
+                          />
                         )}
-                        <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${roomColorObj.dot}`} />
+                        <span
+                          className={`h-2.5 w-2.5 rounded-full shrink-0 ${roomColorObj.dot}`}
+                        />
                         <h4 className="text-[12px] font-bold text-textcolor uppercase tracking-wide truncate">
                           {group.room}
                         </h4>
@@ -1609,177 +1705,213 @@ const QuoteModal = ({
                           // editable so they can be priced/described.
                           const rowLocked = lockScope && !item._userAdded;
                           return (
-                          <div
-                            key={idx}
-                            className="rounded-lg border border-border bg-bg-soft/30 p-2 space-y-2"
-                          >
-                            <div className="grid grid-cols-[1fr_1.5fr_110px_28px] gap-2 items-start">
-                              {rowLocked ? (
-                                <div
-                                  className="bg-bg-soft border border-bordergray text-[11px] text-darkgray rounded-md px-2 py-2 w-full truncate"
-                                  title={item.itemName || ""}
-                                >
-                                  {item.itemName || "—"}
-                                </div>
-                              ) : (
-                                <EditableItemNameInput
-                                  initialValue={item.itemName || ""}
-                                  onSave={(val) => updateScope(idx, "itemName", val)}
-                                  className="bg-white border border-bordergray text-[11px] text-darkgray rounded-md px-2 py-2 w-full focus:outline-none focus:border-gray-300 focus:ring-1 focus:ring-gray-300"
+                            <div
+                              key={idx}
+                              className="rounded-lg border border-border bg-bg-soft/30 p-2 space-y-2"
+                            >
+                              <div className="grid grid-cols-[1fr_1.5fr_110px_28px] gap-2 items-start">
+                                {rowLocked ? (
+                                  <div
+                                    className="bg-bg-soft border border-bordergray text-[11px] text-darkgray rounded-md px-2 py-2 w-full truncate"
+                                    title={item.itemName || ""}
+                                  >
+                                    {item.itemName || "—"}
+                                  </div>
+                                ) : (
+                                  <EditableItemNameInput
+                                    initialValue={item.itemName || ""}
+                                    onSave={(val) =>
+                                      updateScope(idx, "itemName", val)
+                                    }
+                                    className="bg-white border border-bordergray text-[11px] text-darkgray rounded-md px-2 py-2 w-full focus:outline-none focus:border-gray-300 focus:ring-1 focus:ring-gray-300"
+                                  />
+                                )}
+                                <input
+                                  type="text"
+                                  value={item.description || ""}
+                                  onChange={(e) =>
+                                    updateScope(
+                                      idx,
+                                      "description",
+                                      e.target.value,
+                                    )
+                                  }
+                                  placeholder="Description"
+                                  readOnly={rowLocked}
+                                  className={`border text-[11px] text-darkgray rounded-md px-2 py-2 w-full focus:outline-none ${
+                                    rowLocked
+                                      ? "bg-bg-soft border-bordergray cursor-default"
+                                      : "bg-white border-bordergray focus:border-gray-300 focus:ring-1 focus:ring-gray-300"
+                                  }`}
                                 />
-                              )}
-                              <input
-                                type="text"
-                                value={item.description || ""}
-                                onChange={(e) =>
-                                  updateScope(idx, "description", e.target.value)
-                                }
-                                placeholder="Description"
-                                readOnly={rowLocked}
-                                className={`border text-[11px] text-darkgray rounded-md px-2 py-2 w-full focus:outline-none ${
-                                  rowLocked
-                                    ? "bg-bg-soft border-bordergray cursor-default"
-                                    : "bg-white border-bordergray focus:border-gray-300 focus:ring-1 focus:ring-gray-300"
-                                }`}
-                              />
-                              <input
-                                type="number"
-                                value={item.amount}
-                                onChange={(e) =>
-                                  updateScope(idx, "amount", e.target.value)
-                                }
-                                placeholder="₹"
-                                readOnly={rowLocked}
-                                className={`border text-[11px] text-darkgray rounded-md px-2 py-2 w-full focus:outline-none text-right ${
-                                  rowLocked
-                                    ? "bg-bg-soft border-bordergray cursor-default"
-                                    : "bg-white border-bordergray focus:border-gray-300 focus:ring-1 focus:ring-gray-300"
-                                }`}
-                              />
-                              <button
-                                type="button"
-                                onClick={() => removeScopeRow(idx)}
-                                className="h-8 w-7 flex items-center justify-center rounded-md text-text-subtle hover:text-red-500 hover:bg-red-50 transition-colors"
-                                title="Remove row"
-                              >
-                                <Trash2 size={13} />
-                              </button>
-                            </div>
+                                <input
+                                  type="number"
+                                  value={item.amount}
+                                  onChange={(e) =>
+                                    updateScope(idx, "amount", e.target.value)
+                                  }
+                                  placeholder="₹"
+                                  readOnly={rowLocked}
+                                  className={`border text-[11px] text-darkgray rounded-md px-2 py-2 w-full focus:outline-none text-right ${
+                                    rowLocked
+                                      ? "bg-bg-soft border-bordergray cursor-default"
+                                      : "bg-white border-bordergray focus:border-gray-300 focus:ring-1 focus:ring-gray-300"
+                                  }`}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => removeScopeRow(idx)}
+                                  className="h-8 w-7 flex items-center justify-center rounded-md text-text-subtle hover:text-red-500 hover:bg-red-50 transition-colors"
+                                  title="Remove row"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
 
-                            {/* Qty · rate · days meta · per-scope grade */}
-                            <div className="flex items-center gap-3 px-0.5 text-[10px] text-text-muted">
-                              {Number(item.qty) > 0 && (
+                              {/* Qty · rate · days meta · per-scope grade */}
+                              <div className="flex items-center gap-3 px-0.5 text-[10px] text-text-muted">
                                 <span>
-                                  <span className="text-text-subtle">Quantity </span>
+                                  <span className="text-text-subtle">
+                                    Rate/{item.unit}:{" "}
+                                  </span>
                                   <span className="font-semibold">
-                                    {Number(item.qty).toLocaleString("en-IN")}{" "}
-                                    {item.unit}
+                                    ₹
+                                    {Number(item.rate || 0).toLocaleString(
+                                      "en-IN",
+                                    )}
+                                    /{item.unit}
                                   </span>
                                 </span>
-                              )}
-                              <span>
-                                <span className="text-text-subtle">
-                                  Rate/{item.unit}{" "}
-                                </span>
-                                <span className="font-semibold">
-                                  ₹{Number(item.rate || 0).toLocaleString("en-IN")}/
-                                  {item.unit}
-                                </span>
-                              </span>
-                              {(item.days ?? "") !== "" && (
-                                <span>
-                                  <span className="text-text-subtle">Duration </span>
-                                  <span className="font-semibold">{item.days}d</span>
-                                </span>
-                              )}
-                              {(() => {
-                                // Only offer grades that carry a value for this
-                                // row; keep the currently-selected grade visible
-                                // so the control never shows blank.
-                                const valueGrades = gradeKeysByIdx[idx] || new Set();
-                                const current = item.grade || "premium";
-                                const rowGrades = gradeOptions.filter(
-                                  (g) =>
-                                    valueGrades.has(g.key) || g.key === current,
-                                );
-                                if (rowGrades.length === 0) return null;
-                                return (
-                                  <label className="flex items-center gap-1 ml-auto">
-                                    <span className="text-text-subtle">Grade</span>
-                                    <select
-                                      value={current}
-                                      onChange={(e) =>
-                                        handleScopeGradeChange(idx, e.target.value)
-                                      }
-                                      className="bg-white border border-bordergray text-[10px] text-darkgray rounded-md px-1.5 py-1 focus:outline-none focus:border-select-blue cursor-pointer"
-                                      title="Quality grade for this scope item"
-                                    >
-                                      {rowGrades.map((g) => (
-                                        <option key={g.key} value={g.key}>
-                                          {g.label}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </label>
-                                );
-                              })()}
-                            </div>
 
-                            {/* Material specs */}
-                            {(item.materials || []).length > 0 && (
-                              <div className="pl-3 border-l-2 border-select-blue/30 space-y-1.5">
-                                {item.materials.map((m, mIdx) => (
-                                  <div
-                                    key={mIdx}
-                                    className={`grid gap-2 items-center ${
-                                      rowLocked
-                                        ? "grid-cols-[100px_1fr]"
-                                        : "grid-cols-[100px_1fr_22px]"
-                                    }`}
-                                  >
-                                    <input
-                                      type="text"
-                                      value={m.name}
-                                      onChange={(e) =>
-                                        updateMaterial(idx, mIdx, "name", e.target.value)
-                                      }
-                                      placeholder="Plywood"
-                                      readOnly={rowLocked}
-                                      className={`border text-[10px] text-darkgray rounded-md px-2 py-1.5 w-full focus:outline-none ${
-                                        rowLocked
-                                          ? "bg-bg-soft border-bordergray cursor-default"
-                                          : "bg-white border-bordergray focus:border-gray-300 focus:ring-1 focus:ring-gray-300"
-                                      }`}
-                                    />
-                                    <input
-                                      type="text"
-                                      value={m.spec}
-                                      onChange={(e) =>
-                                        updateMaterial(idx, mIdx, "spec", e.target.value)
-                                      }
-                                      placeholder="BWP 19mm"
-                                      readOnly={rowLocked}
-                                      className={`border text-[10px] text-darkgray rounded-md px-2 py-1.5 w-full focus:outline-none ${
-                                        rowLocked
-                                          ? "bg-bg-soft border-bordergray cursor-default"
-                                          : "bg-white border-bordergray focus:border-gray-300 focus:ring-1 focus:ring-gray-300"
-                                      }`}
-                                    />
-                                    {!rowLocked && (
-                                      <button
-                                        type="button"
-                                        onClick={() => removeMaterial(idx, mIdx)}
-                                        className="h-7 w-6 flex items-center justify-center rounded-md text-text-subtle hover:text-red-500 hover:bg-red-50 transition-colors"
-                                        title="Remove material"
+                                {Number(item.qty) > 0 && (
+                                  <span>
+                                    <span className="text-text-subtle">
+                                      Quantity:{" "}
+                                    </span>
+                                    <span className="font-semibold">
+                                      {Number(item.qty).toLocaleString("en-IN")}{" "}
+                                      {item.unit}
+                                    </span>
+                                  </span>
+                                )}
+
+                                {(item.days ?? "") !== "" && (
+                                  <span>
+                                    <span className="text-text-subtle">
+                                      Duration:{" "}
+                                    </span>
+                                    <span className="font-semibold">
+                                      {item.days}d
+                                    </span>
+                                  </span>
+                                )}
+                                {(() => {
+                                  // Only offer grades that carry a value for this
+                                  // row; keep the currently-selected grade visible
+                                  // so the control never shows blank.
+                                  const valueGrades =
+                                    gradeKeysByIdx[idx] || new Set();
+                                  const current = item.grade || "premium";
+                                  const rowGrades = gradeOptions.filter(
+                                    (g) =>
+                                      valueGrades.has(g.key) ||
+                                      g.key === current,
+                                  );
+                                  if (rowGrades.length === 0) return null;
+                                  return (
+                                    <label className="flex items-center gap-1 ml-auto">
+                                      <span className="text-text-subtle">
+                                        Grade
+                                      </span>
+                                      <select
+                                        value={current}
+                                        onChange={(e) =>
+                                          handleScopeGradeChange(
+                                            idx,
+                                            e.target.value,
+                                          )
+                                        }
+                                        className="bg-white border border-bordergray text-[10px] text-darkgray rounded-md px-1.5 py-1 focus:outline-none focus:border-select-blue cursor-pointer"
+                                        title="Quality grade for this scope item"
                                       >
-                                        <Trash2 size={11} />
-                                      </button>
-                                    )}
-                                  </div>
-                                ))}
+                                        {rowGrades.map((g) => (
+                                          <option key={g.key} value={g.key}>
+                                            {g.label}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </label>
+                                  );
+                                })()}
                               </div>
-                            )}
-                          </div>
+
+                              {/* Material specs */}
+                              {(item.materials || []).length > 0 && (
+                                <div className="pl-3 border-l-2 border-select-blue/30 space-y-1.5">
+                                  {item.materials.map((m, mIdx) => (
+                                    <div
+                                      key={mIdx}
+                                      className={`grid gap-2 items-center ${
+                                        rowLocked
+                                          ? "grid-cols-[100px_1fr]"
+                                          : "grid-cols-[100px_1fr_22px]"
+                                      }`}
+                                    >
+                                      <input
+                                        type="text"
+                                        value={m.name}
+                                        onChange={(e) =>
+                                          updateMaterial(
+                                            idx,
+                                            mIdx,
+                                            "name",
+                                            e.target.value,
+                                          )
+                                        }
+                                        placeholder="Plywood"
+                                        readOnly={rowLocked}
+                                        className={`border text-[10px] text-darkgray rounded-md px-2 py-1.5 w-full focus:outline-none ${
+                                          rowLocked
+                                            ? "bg-bg-soft border-bordergray cursor-default"
+                                            : "bg-white border-bordergray focus:border-gray-300 focus:ring-1 focus:ring-gray-300"
+                                        }`}
+                                      />
+                                      <input
+                                        type="text"
+                                        value={m.spec}
+                                        onChange={(e) =>
+                                          updateMaterial(
+                                            idx,
+                                            mIdx,
+                                            "spec",
+                                            e.target.value,
+                                          )
+                                        }
+                                        placeholder="BWP 19mm"
+                                        readOnly={rowLocked}
+                                        className={`border text-[10px] text-darkgray rounded-md px-2 py-1.5 w-full focus:outline-none ${
+                                          rowLocked
+                                            ? "bg-bg-soft border-bordergray cursor-default"
+                                            : "bg-white border-bordergray focus:border-gray-300 focus:ring-1 focus:ring-gray-300"
+                                        }`}
+                                      />
+                                      {!rowLocked && (
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            removeMaterial(idx, mIdx)
+                                          }
+                                          className="h-7 w-6 flex items-center justify-center rounded-md text-text-subtle hover:text-red-500 hover:bg-red-50 transition-colors"
+                                          title="Remove material"
+                                        >
+                                          <Trash2 size={11} />
+                                        </button>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
                           );
                         })}
                       </div>
@@ -1818,9 +1950,7 @@ const QuoteModal = ({
                 Original proposal: {formatAmount(originalTotal)} ·{" "}
                 {increasePct >= 0 ? "+" : ""}
                 {increasePct.toFixed(1)}% vs original
-                {overLimit
-                  ? ` — exceeds the ${MAX_INCREASE_PCT}% limit`
-                  : ""}
+                {overLimit ? ` — exceeds the ${MAX_INCREASE_PCT}% limit` : ""}
               </div>
             )}
           </div>
@@ -1842,8 +1972,12 @@ const QuoteModal = ({
                       const categoriesList = getCategoriesList();
                       categoriesList.forEach((cat) => {
                         const global = getGlobalTerms(cat);
-                        categoryInclusions[cat] = global.inclusions.filter((t) => t.isDefault).map((t) => t.text);
-                        categoryExclusions[cat] = global.exclusions.filter((t) => t.isDefault).map((t) => t.text);
+                        categoryInclusions[cat] = global.inclusions
+                          .filter((t) => t.isDefault)
+                          .map((t) => t.text);
+                        categoryExclusions[cat] = global.exclusions
+                          .filter((t) => t.isDefault)
+                          .map((t) => t.text);
                         addedInclusions[cat] = [];
                         addedExclusions[cat] = [];
                       });
@@ -1879,7 +2013,10 @@ const QuoteModal = ({
                   onClick={() => setTermsParentModalOpen(true)}
                   className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-select-blue bg-select-blue/5 text-select-blue text-[11.5px] font-bold hover:bg-select-blue/10 hover:shadow-sm transition-all cursor-pointer group"
                 >
-                  <Plus size={14} className="text-select-blue group-hover:scale-110 transition-transform" />
+                  <Plus
+                    size={14}
+                    className="text-select-blue group-hover:scale-110 transition-transform"
+                  />
                   <span>Add Conditions</span>
                 </button>
               </div>
@@ -1893,10 +2030,18 @@ const QuoteModal = ({
                 const isExpanded = !!expandedCategories[cat.id];
 
                 return (
-                  <div key={cat.id} className="border border-bordergray rounded-xl overflow-hidden bg-white shadow-xs">
+                  <div
+                    key={cat.id}
+                    className="border border-bordergray rounded-xl overflow-hidden bg-white shadow-xs"
+                  >
                     <button
                       type="button"
-                      onClick={() => setExpandedCategories((prev) => ({ ...prev, [cat.id]: !prev[cat.id] }))}
+                      onClick={() =>
+                        setExpandedCategories((prev) => ({
+                          ...prev,
+                          [cat.id]: !prev[cat.id],
+                        }))
+                      }
                       className="w-full flex items-center justify-between px-4 py-3 bg-bg-soft/40 hover:bg-bg-soft transition-all cursor-pointer"
                     >
                       <div className="flex items-center gap-2">
@@ -1910,13 +2055,19 @@ const QuoteModal = ({
                       </div>
                       <div className="text-text-muted">
                         {isExpanded ? (
-                          <ChevronDown size={14} className="text-textcolor/60" />
+                          <ChevronDown
+                            size={14}
+                            className="text-textcolor/60"
+                          />
                         ) : (
-                          <ChevronRight size={14} className="text-textcolor/60" />
+                          <ChevronRight
+                            size={14}
+                            className="text-textcolor/60"
+                          />
                         )}
                       </div>
                     </button>
-                    
+
                     {isExpanded && (
                       <div className="p-4 border-t border-bordergray/50 grid grid-cols-1 md:grid-cols-2 gap-5 bg-white">
                         {/* Included Column (always left) */}
@@ -1927,9 +2078,14 @@ const QuoteModal = ({
                           <div className="space-y-2">
                             {(() => {
                               const global = getGlobalTerms(cat.id);
-                              const defaultIn = global.inclusions.filter((t) => t.isDefault).map((t) => t.text);
-                              const addedIn = formData.addedInclusions?.[cat.id] || [];
-                              const visibleIn = Array.from(new Set([...defaultIn, ...addedIn]));
+                              const defaultIn = global.inclusions
+                                .filter((t) => t.isDefault)
+                                .map((t) => t.text);
+                              const addedIn =
+                                formData.addedInclusions?.[cat.id] || [];
+                              const visibleIn = Array.from(
+                                new Set([...defaultIn, ...addedIn]),
+                              );
 
                               if (visibleIn.length === 0) {
                                 return (
@@ -1941,7 +2097,10 @@ const QuoteModal = ({
 
                               return (
                                 <div
-                                  style={{ maxHeight: '152px', scrollBehavior: 'smooth' }}
+                                  style={{
+                                    maxHeight: "152px",
+                                    scrollBehavior: "smooth",
+                                  }}
                                   className="space-y-2 overflow-y-auto scroll-hidden-bar scroll-smooth"
                                 >
                                   {visibleIn.map((item, idx) => {
@@ -1949,7 +2108,9 @@ const QuoteModal = ({
                                     return (
                                       <div
                                         key={idx}
-                                        onClick={() => toggleInclusion(item, cat.id)}
+                                        onClick={() =>
+                                          toggleInclusion(item, cat.id)
+                                        }
                                         className="flex items-start gap-2.5 cursor-pointer group py-1 px-1.5 rounded hover:bg-bg-soft transition-all select-none text-left"
                                       >
                                         <div className="pt-0.5 shrink-0">
@@ -1970,7 +2131,7 @@ const QuoteModal = ({
                             })()}
                           </div>
                         </div>
-                        
+
                         {/* Not Included Column (always right) */}
                         <div>
                           <h4 className="text-[10px] font-bold text-red-500 tracking-wider uppercase mb-2">
@@ -1979,9 +2140,14 @@ const QuoteModal = ({
                           <div className="space-y-2">
                             {(() => {
                               const global = getGlobalTerms(cat.id);
-                              const defaultEx = global.exclusions.filter((t) => t.isDefault).map((t) => t.text);
-                              const addedEx = formData.addedExclusions?.[cat.id] || [];
-                              const visibleEx = Array.from(new Set([...defaultEx, ...addedEx]));
+                              const defaultEx = global.exclusions
+                                .filter((t) => t.isDefault)
+                                .map((t) => t.text);
+                              const addedEx =
+                                formData.addedExclusions?.[cat.id] || [];
+                              const visibleEx = Array.from(
+                                new Set([...defaultEx, ...addedEx]),
+                              );
 
                               if (visibleEx.length === 0) {
                                 return (
@@ -1993,7 +2159,10 @@ const QuoteModal = ({
 
                               return (
                                 <div
-                                  style={{ maxHeight: '152px', scrollBehavior: 'smooth' }}
+                                  style={{
+                                    maxHeight: "152px",
+                                    scrollBehavior: "smooth",
+                                  }}
                                   className="space-y-2 overflow-y-auto scroll-hidden-bar scroll-smooth"
                                 >
                                   {visibleEx.map((item, idx) => {
@@ -2001,7 +2170,9 @@ const QuoteModal = ({
                                     return (
                                       <div
                                         key={idx}
-                                        onClick={() => toggleExclusion(item, cat.id)}
+                                        onClick={() =>
+                                          toggleExclusion(item, cat.id)
+                                        }
                                         className="flex items-start gap-2.5 cursor-pointer group py-1 px-1.5 rounded hover:bg-bg-soft transition-all select-none text-left"
                                       >
                                         <div className="pt-0.5 shrink-0">
@@ -2072,8 +2243,12 @@ const QuoteModal = ({
             {/* Modal Header */}
             <div className="flex items-center justify-between px-6 py-4 bg-bg-soft border-b border-bordergray">
               <div>
-                <h3 className="text-[14px] font-bold text-textcolor">Add Conditions</h3>
-                <p className="text-[10px] text-text-muted mt-0.5">Select a category to customize Terms & Conditions</p>
+                <h3 className="text-[14px] font-bold text-textcolor">
+                  Add Conditions
+                </h3>
+                <p className="text-[10px] text-text-muted mt-0.5">
+                  Select a category to customize Terms & Conditions
+                </p>
               </div>
               <button
                 type="button"
@@ -2119,7 +2294,10 @@ const QuoteModal = ({
                           {count} selected
                         </span>
                       )}
-                      <ChevronRight size={14} className="text-text-muted group-hover:text-textcolor transition-colors" />
+                      <ChevronRight
+                        size={14}
+                        className="text-text-muted group-hover:text-textcolor transition-colors"
+                      />
                     </div>
                   </button>
                 );
@@ -2145,25 +2323,48 @@ const QuoteModal = ({
         <CategoryTermsModal
           category={activeCategoryModal}
           categoryLabel={
-            getCategoriesMeta().find((c) => c.id === activeCategoryModal)?.label || ""
+            getCategoriesMeta().find((c) => c.id === activeCategoryModal)
+              ?.label || ""
           }
-          initialInclusions={formData.categoryInclusions?.[activeCategoryModal] || []}
-          initialExclusions={formData.categoryExclusions?.[activeCategoryModal] || []}
-          addedInclusions={formData.addedInclusions?.[activeCategoryModal] || []}
-          addedExclusions={formData.addedExclusions?.[activeCategoryModal] || []}
+          initialInclusions={
+            formData.categoryInclusions?.[activeCategoryModal] || []
+          }
+          initialExclusions={
+            formData.categoryExclusions?.[activeCategoryModal] || []
+          }
+          addedInclusions={
+            formData.addedInclusions?.[activeCategoryModal] || []
+          }
+          addedExclusions={
+            formData.addedExclusions?.[activeCategoryModal] || []
+          }
           onApply={(newInclusions, newExclusions) => {
             const global = getGlobalTerms(activeCategoryModal);
-            const defaultInTexts = global.inclusions.filter((t) => t.isDefault).map((t) => t.text);
-            const defaultExTexts = global.exclusions.filter((t) => t.isDefault).map((t) => t.text);
+            const defaultInTexts = global.inclusions
+              .filter((t) => t.isDefault)
+              .map((t) => t.text);
+            const defaultExTexts = global.exclusions
+              .filter((t) => t.isDefault)
+              .map((t) => t.text);
 
-            const prevCatIn = formData.categoryInclusions?.[activeCategoryModal] || [];
-            const prevCatEx = formData.categoryExclusions?.[activeCategoryModal] || [];
+            const prevCatIn =
+              formData.categoryInclusions?.[activeCategoryModal] || [];
+            const prevCatEx =
+              formData.categoryExclusions?.[activeCategoryModal] || [];
 
-            const currentSelectedDefaultsIn = prevCatIn.filter((t) => defaultInTexts.includes(t));
-            const currentSelectedDefaultsEx = prevCatEx.filter((t) => defaultExTexts.includes(t));
+            const currentSelectedDefaultsIn = prevCatIn.filter((t) =>
+              defaultInTexts.includes(t),
+            );
+            const currentSelectedDefaultsEx = prevCatEx.filter((t) =>
+              defaultExTexts.includes(t),
+            );
 
-            const updatedCatIn = Array.from(new Set([...currentSelectedDefaultsIn, ...newInclusions]));
-            const updatedCatEx = Array.from(new Set([...currentSelectedDefaultsEx, ...newExclusions]));
+            const updatedCatIn = Array.from(
+              new Set([...currentSelectedDefaultsIn, ...newInclusions]),
+            );
+            const updatedCatEx = Array.from(
+              new Set([...currentSelectedDefaultsEx, ...newExclusions]),
+            );
 
             const updatedAddedIn = newInclusions;
             const updatedAddedEx = newExclusions;
@@ -2260,7 +2461,9 @@ const QuoteModal = ({
           maxWidth="max-w-[400px]"
         >
           <p className="text-[12.5px] text-text-muted leading-relaxed">
-            Are you sure you want to delete the category <strong>{deleteGroupConfirm}</strong> and all its associated items? This action cannot be undone.
+            Are you sure you want to delete the category{" "}
+            <strong>{deleteGroupConfirm}</strong> and all its associated items?
+            This action cannot be undone.
           </p>
         </Modal>
       )}

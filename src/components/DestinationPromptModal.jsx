@@ -242,7 +242,9 @@ const DestinationPromptModal = ({
 
           <div className="border-t border-bordergray my-4" />
 
-          {/* Create New Heading Form with locked prefix */}
+          {/* Create New Heading Form. With a resolved category the prefix is
+              locked (e.g. "KITCHEN - …"); without one the user can type a fully
+              custom heading. */}
           <div>
             <h4 className="text-[10px] font-bold text-text-subtle tracking-wider uppercase mb-2">
               Or Create New Heading

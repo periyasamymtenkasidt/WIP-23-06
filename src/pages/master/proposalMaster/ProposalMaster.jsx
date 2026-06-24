@@ -70,8 +70,8 @@ import {
   materialsById,
   collectGrades,
   gradeLabel,
-  recipeToMaterials,
 } from "../../../data/rateBuildup";
+import { mapScopeItemsToGrade } from "../../../data/gradeMapping";
 import { PROPERTY_TYPES } from "../../../helperConfigData/helperData";
 import {
   getGlobalPropertyTypes,
@@ -531,13 +531,6 @@ const ProposalMaster = () => {
     for (const item of listLibrary()) items[item.id] = item;
     return items;
   }, [libVersion]);
-  const buildupMatById = useMemo(
-    () => {
-      void libVersion;
-      return materialsById(listMaterials());
-    },
-    [libVersion],
-  );
   const availableGrades = useMemo(
     () => collectGrades(Object.values(libById)),
     [libById],
@@ -651,27 +644,11 @@ const ProposalMaster = () => {
 
   const applyGradeToConfig = (grade) => {
     setConfigField((config) => {
-      let items = (config.scopeItems || []).map((scopeItem) => {
-        const libraryItem = scopeItem.masterId
-          ? libById[scopeItem.masterId]
-          : null;
-        const recipes = libraryItem?.recipes || scopeItem.recipes;
-        const recipe = recipes?.[grade];
-        if (!recipe) return scopeItem;
-
-        const rate = Math.round(computeRecipe(recipe, buildupMatById).rate);
-        const quantity = Number(scopeItem.qty) || 0;
-        return {
-          ...scopeItem,
-          rate,
-          grade,
-          defaultGrade: grade,
-          recipes,
-          materials: recipeToMaterials(recipe, buildupMatById),
-          amount:
-            quantity > 0 ? Math.round(quantity * rate) : scopeItem.amount,
-        };
-      });
+      // Map every scope row to the selected grade via the shared mapper. It
+      // resolves the linked Item Master item by masterId OR by name, so rows
+      // added from the library (which may not carry a masterId) still pick up
+      // the grade's rate, materials and amount — matching the QuoteModal flow.
+      let items = mapScopeItemsToGrade(config.scopeItems || [], grade);
 
       if (config.enableFormulaEstimator) {
         const totalArea =
@@ -721,6 +698,22 @@ const ProposalMaster = () => {
       applyGrade();
     }
   };
+
+  // Auto-map the scope of work to the selected quality grade. Whenever a config
+  // loads, its grade changes, or a row is added, any row not yet aligned to the
+  // active grade is mapped to that grade's Item Master rate/materials/amount —
+  // so the scope data always reflects the selected grade without a manual
+  // toggle. Rows already tagged with the active grade are left untouched, so
+  // this never loops and never clobbers manual rate edits on aligned rows.
+  useEffect(() => {
+    if (!active || !activeConfig) return;
+    const items = activeConfig.scopeItems || [];
+    if (items.length === 0) return;
+    const aligned = items.every((it) => (it.grade || "") === activeGrade);
+    if (aligned) return;
+    applyGradeToConfig(activeGrade);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeKey, activeConfigIdx, activeGrade, activeConfig?.scopeItems?.length]);
 
   const updateScope = (idx, key, value) => {
     setConfigField((cfg) => {

@@ -4,6 +4,7 @@ import {
   getProposalRoomHeadings,
   getCategoryFromProposalHeading,
   getProposalRoomPresets,
+  addProposalRoom,
 } from "../data/proposalRooms";
 
 /**
@@ -37,11 +38,25 @@ const EditableHeadingDropdown = ({
   // sub-headings after a category is chosen.
   const [phase, setPhase] = useState("category");
   const [selectedCategory, setSelectedCategory] = useState(category || "");
+  // Bumped whenever the proposal rooms list changes (e.g. after creating a new
+  // custom heading) so the presets list re-reads and shows the new entry.
+  const [roomsVersion, setRoomsVersion] = useState(0);
   const dropdownRef = useRef(null);
   const customInputRef = useRef(null);
 
-  // Get all room/category presets from the Proposal rooms list (single source)
-  const roomCategories = useMemo(() => getProposalRoomPresets(), []);
+  useEffect(() => {
+    const handler = () => setRoomsVersion((v) => v + 1);
+    window.addEventListener("proposalRoomsChanged", handler);
+    return () => window.removeEventListener("proposalRoomsChanged", handler);
+  }, []);
+
+  // Get all room/category presets from the Proposal rooms list (single source).
+  // roomsVersion is referenced so the memo re-reads after a new heading is
+  // persisted (the list lives in localStorage, which ESLint can't track).
+  const roomCategories = useMemo(() => {
+    void roomsVersion;
+    return getProposalRoomPresets();
+  }, [roomsVersion]);
 
   // Get all headings from the rooms list, filtered by the resolved category
   const resolvedCategory = selectedCategory || category;
@@ -178,6 +193,20 @@ const EditableHeadingDropdown = ({
     setIsOpen(false);
   };
 
+  // Create a brand-new custom heading from the typed text (one that matches no
+  // existing room/category). It's persisted as a new room so it appears in the
+  // presets dropdown afterwards, and committed as the selected heading.
+  const handleCreateCustom = () => {
+    const name = typedValue.trim().toUpperCase();
+    if (!name) return;
+    addProposalRoom(name);
+    onChange(name);
+    setIsOpen(false);
+    setIsTyping(false);
+    setTypedValue(name);
+    setPhase("category");
+  };
+
   const handleCustomSubmit = () => {
     const suffix = customSuffix.trim();
     if (!suffix) return;
@@ -185,6 +214,14 @@ const EditableHeadingDropdown = ({
     onChange(newHeading);
     setIsCustom(false);
     setCustomSuffix("");
+  };
+
+  // Leave custom-suffix mode and reopen the dropdown so the category can be
+  // changed — without forcing the user to click outside first.
+  const handleExitCustom = () => {
+    setIsCustom(false);
+    setCustomSuffix("");
+    setIsOpen(true);
   };
 
   const handleCustomKeyDown = (e) => {
@@ -220,14 +257,19 @@ const EditableHeadingDropdown = ({
       {isCustom ? (
         /* ── Custom heading input with locked prefix ─────────────── */
         <div className="flex items-center gap-0 border border-select-blue rounded-lg overflow-hidden bg-white focus-within:ring-2 focus-within:ring-select-blue/15">
-          {/* Locked prefix */}
-          <div className="flex items-center gap-1 bg-bg-soft border-r border-bordergray px-2.5 py-2 shrink-0 select-none">
+          {/* Locked prefix — click to unlock and change the category */}
+          <button
+            type="button"
+            onClick={handleExitCustom}
+            title="Click to change category"
+            className="flex items-center gap-1 bg-bg-soft border-r border-bordergray px-2.5 py-2 shrink-0 select-none cursor-pointer hover:bg-bordergray/40 transition-colors"
+          >
             <Lock size={10} className="text-text-subtle" />
             <span className="text-[12px] font-bold text-textcolor uppercase whitespace-nowrap">
               {categoryPrefix}
             </span>
             <span className="text-[12px] text-text-muted font-medium"> - </span>
-          </div>
+          </button>
           {/* Editable suffix */}
           <input
             ref={customInputRef}
@@ -340,6 +382,26 @@ const EditableHeadingDropdown = ({
                   );
                 })}
               </div>
+
+              {/* Create a brand-new custom heading from the typed text when it
+                  matches none of the presets. */}
+              {typedValue.trim() &&
+                !roomCategories.some(
+                  (r) =>
+                    r.name.trim().toUpperCase() ===
+                    typedValue.trim().toUpperCase(),
+                ) && (
+                  <div className="p-2 border-t border-bordergray shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleCreateCustom}
+                      className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-dashed border-select-blue/40 text-select-blue text-[11px] font-semibold hover:bg-active-bg/40 transition-all"
+                    >
+                      <Plus size={12} />
+                      Create heading "{typedValue.trim().toLocaleLowerCase}"
+                    </button>
+                  </div>
+                )}
             </>
           ) : (
             /* ── Sub-headings list for selected category ────── */

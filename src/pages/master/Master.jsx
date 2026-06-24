@@ -1,11 +1,13 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
-import { FileText, BookOpen, FileCheck, CalendarClock, Layers } from "lucide-react";
+import { FileText, BookOpen, FileCheck, Layers } from "lucide-react";
 import ProposalMaster from "./proposalMaster/ProposalMaster";
 import ItemLibrary from "./itemMaster/ItemLibrary";
 import MaterialMaster from "./materialMaster/MaterialMaster";
 import TermsAndConditions from "./termsAndConditions/TermsAndConditions";
-import ScheduleConfig from "./scheduleConfig/ScheduleConfig";
+// Schedule Master tab commented out — reserved for future use.
+// import { CalendarClock } from "lucide-react";
+// import ScheduleConfig from "./scheduleConfig/ScheduleConfig";
 
 // Settings is the hub for all "master" data — anything that's a reusable
 // template / catalog rather than transactional record. Each tab is itself a
@@ -39,13 +41,14 @@ const TABS = [
     description: "Reusable T&C templates per property preset",
     component: TermsAndConditions,
   },
-  {
-    id: "schedule",
-    label: "Schedule",
-    icon: CalendarClock,
-    description: "Escalation tiers, rooms & statuses for project schedules",
-    component: ScheduleConfig,
-  },
+  // Schedule Master tab commented out — reserved for future use.
+  // {
+  //   id: "schedule",
+  //   label: "Schedule",
+  //   icon: CalendarClock,
+  //   description: "Escalation tiers, rooms & statuses for project schedules",
+  //   component: ScheduleConfig,
+  // },
 ];
 
 const Master = () => {

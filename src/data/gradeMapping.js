@@ -63,3 +63,22 @@ export const mapScopeItemsToGrade = (scopeItems = [], grade = "premium") => {
     mapScopeItemToGrade(scope, grade ?? scope.grade ?? "premium"),
   );
 };
+
+// Whether a scope row carries a usable value for the given grade — i.e. its
+// linked Item Master item (by masterId or name) has a recipe for that grade
+// that computes to a rate > 0. Used by the proposal forms to hide grade
+// options that hold no value for a particular row. Pass precomputed `library`
+// and `materialLookup` to avoid re-reading storage per call.
+export const gradeHasValue = (scope, grade, opts = {}) => {
+  if (!grade) return false;
+  const library = opts.library || listLibrary();
+  const materialLookup = opts.materialLookup || materialsById(listMaterials());
+
+  const libraryItem = findLibraryItem(scope, library);
+  const recipes = libraryItem?.recipes || scope.recipes;
+  const recipe = recipes?.[grade];
+  if (!recipe) return false;
+
+  const calculation = computeRecipe(recipe, materialLookup);
+  return (calculation?.rate || 0) > 0;
+};

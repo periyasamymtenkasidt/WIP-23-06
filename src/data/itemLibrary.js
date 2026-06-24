@@ -2,7 +2,8 @@
 // Stored under `item_library` in localStorage; ships with a curated set
 // of common interior fit-out items so the library is useful from day one.
 
-import { getRoomDefaultDays } from "./scheduleConfig";
+// Schedule Master days mapping commented out — reserved for future use.
+// import { getRoomDefaultDays } from "./scheduleConfig";
 
 const STORAGE_KEY = "item_library";
 
@@ -223,14 +224,15 @@ const LEGACY_CATEGORY_MAP = {
 const normalizeCategory = (cat) =>
   cat in LEGACY_CATEGORY_MAP ? LEGACY_CATEGORY_MAP[cat] : cat || "";
 
-// Normalize category, and seed a per-item `days` (schedule duration). An item's
-// own value wins; otherwise it falls back to the default configured for its room
-// category (Master → Schedule), so durations stay sensible without per-item entry.
+// Normalize category, and seed a per-item `days` (schedule duration). The
+// item's own value is used directly. The Schedule Master fallback (room
+// category → default days) is commented out — reserved for future use.
 const normalizeItem = (it) => {
   const category = normalizeCategory(it.category);
-  const defaultDays = getRoomDefaultDays(category);
-  const days =
-    defaultDays !== "" && defaultDays != null ? defaultDays : (it.days ?? "");
+  // const defaultDays = getRoomDefaultDays(category);
+  // const days =
+  //   defaultDays !== "" && defaultDays != null ? defaultDays : (it.days ?? "");
+  const days = it.days ?? "";
   let recipes = it.recipes;
   // Older rate build-ups initialized all three standard grades as exact
   // clones, so changing grade could never change the quote. Migrate only that

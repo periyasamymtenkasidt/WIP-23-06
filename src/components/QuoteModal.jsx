@@ -77,8 +77,13 @@ import {
   computeLibraryItemArea,
   listLibrary,
 } from "../data/itemLibrary";
-import { mapScopeItemsToGrade, mapScopeItemToGrade } from "../data/gradeMapping";
-import { collectGrades } from "../data/rateBuildup";
+import {
+  mapScopeItemsToGrade,
+  mapScopeItemToGrade,
+  gradeHasValue,
+} from "../data/gradeMapping";
+import { collectGrades, materialsById } from "../data/rateBuildup";
+import { listMaterials } from "../data/materialLibrary";
 import { formatAmount } from "../utils/formatAmount";
 import {
   assignCategoryNames,
@@ -666,8 +671,8 @@ const QuoteModal = ({
   const [expandedCategories, setExpandedCategories] = useState(() => {
     const cats = getTermsCategories();
     const initial = {};
-    cats.forEach((c, idx) => {
-      initial[c.id] = idx === 0;
+    cats.forEach((c) => {
+      initial[c.id] = false;
     });
     return initial;
   });
@@ -723,6 +728,24 @@ const QuoteModal = ({
     [formData.scopeItems],
   );
   const gradeOptions = useMemo(() => collectGrades(listLibrary()), []);
+
+  // Per scope row, the set of grade keys that actually carry a value (a recipe
+  // computing to a rate > 0). The grade dropdown only offers these, so a grade
+  // with no value for a row is hidden for that row alone.
+  const gradeKeysByIdx = useMemo(() => {
+    const library = listLibrary();
+    const materialLookup = materialsById(listMaterials());
+    return (formData.scopeItems || []).map(
+      (item) =>
+        new Set(
+          gradeOptions
+            .filter((g) =>
+              gradeHasValue(item, g.key, { library, materialLookup }),
+            )
+            .map((g) => g.key),
+        ),
+    );
+  }, [formData.scopeItems, gradeOptions]);
 
   // Grade is chosen per scope item: re-map only the targeted row to the new
   // grade (rate, materials & amount), leaving every other row untouched.
@@ -1646,34 +1669,60 @@ const QuoteModal = ({
                             {/* Qty · rate · days meta · per-scope grade */}
                             <div className="flex items-center gap-3 px-0.5 text-[10px] text-text-muted">
                               {Number(item.qty) > 0 && (
-                                <span className="font-semibold">
-                                  {Number(item.qty).toLocaleString("en-IN")}
+                                <span>
+                                  <span className="text-text-subtle">Quantity </span>
+                                  <span className="font-semibold">
+                                    {Number(item.qty).toLocaleString("en-IN")}{" "}
+                                    {item.unit}
+                                  </span>
                                 </span>
                               )}
                               <span>
-                                ₹{Number(item.rate || 0).toLocaleString("en-IN")}/
-                                {item.unit}
+                                <span className="text-text-subtle">
+                                  Rate/{item.unit}{" "}
+                                </span>
+                                <span className="font-semibold">
+                                  ₹{Number(item.rate || 0).toLocaleString("en-IN")}/
+                                  {item.unit}
+                                </span>
                               </span>
-                              {(item.days ?? "") !== "" && <span>{item.days}d</span>}
-                              {gradeOptions.length > 0 && (
-                                <label className="flex items-center gap-1 ml-auto">
-                                  <span className="text-text-subtle">Grade</span>
-                                  <select
-                                    value={item.grade || "premium"}
-                                    onChange={(e) =>
-                                      handleScopeGradeChange(idx, e.target.value)
-                                    }
-                                    className="bg-white border border-bordergray text-[10px] text-darkgray rounded-md px-1.5 py-1 focus:outline-none focus:border-select-blue cursor-pointer"
-                                    title="Quality grade for this scope item"
-                                  >
-                                    {gradeOptions.map((g) => (
-                                      <option key={g.key} value={g.key}>
-                                        {g.label}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </label>
+                              {(item.days ?? "") !== "" && (
+                                <span>
+                                  <span className="text-text-subtle">Duration </span>
+                                  <span className="font-semibold">{item.days}d</span>
+                                </span>
                               )}
+                              {(() => {
+                                // Only offer grades that carry a value for this
+                                // row; keep the currently-selected grade visible
+                                // so the control never shows blank.
+                                const valueGrades = gradeKeysByIdx[idx] || new Set();
+                                const current = item.grade || "premium";
+                                const rowGrades = gradeOptions.filter(
+                                  (g) =>
+                                    valueGrades.has(g.key) || g.key === current,
+                                );
+                                if (rowGrades.length === 0) return null;
+                                return (
+                                  <label className="flex items-center gap-1 ml-auto">
+                                    <span className="text-text-subtle">Grade</span>
+                                    <select
+                                      value={current}
+                                      onChange={(e) =>
+                                        handleScopeGradeChange(idx, e.target.value)
+                                      }
+                                      className="bg-white border border-bordergray text-[10px] text-darkgray rounded-md px-1.5 py-1 focus:outline-none focus:border-select-blue cursor-pointer"
+                                      title="Quality grade for this scope item"
+                                    >
+                                      {rowGrades.map((g) => (
+                                        <option key={g.key} value={g.key}>
+                                          {g.label}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                );
+                              })()}
                             </div>
 
                             {/* Material specs */}
@@ -2018,7 +2067,7 @@ const QuoteModal = ({
 
       {/* Add Conditions Parent Modal */}
       {termsParentModalOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-[9999] animate-fade-in p-4">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-9999 animate-fade-in p-4">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden border border-bordergray transform scale-100 transition-all duration-300">
             {/* Modal Header */}
             <div className="flex items-center justify-between px-6 py-4 bg-bg-soft border-b border-bordergray">

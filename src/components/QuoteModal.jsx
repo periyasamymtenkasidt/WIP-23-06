@@ -77,8 +77,8 @@ import {
   computeLibraryItemArea,
   listLibrary,
 } from "../data/itemLibrary";
-import { mapScopeItemsToGrade } from "../data/gradeMapping";
-import { collectGrades, gradeLabel } from "../data/rateBuildup";
+import { mapScopeItemsToGrade, mapScopeItemToGrade } from "../data/gradeMapping";
+import { collectGrades } from "../data/rateBuildup";
 import { formatAmount } from "../utils/formatAmount";
 import {
   assignCategoryNames,
@@ -93,7 +93,8 @@ import {
 import { roomColor } from "../data/categoryColors";
 import CategorySelect from "./CategorySelect";
 import LibraryPickerModal from "./LibraryPickerModal";
-import { getRoomDefaultDays, getRoomCategoryPresets } from "../data/scheduleConfig";
+import { getRoomDefaultDays } from "../data/scheduleConfig";
+import { getProposalRoomPresets } from "../data/proposalRooms";
 
 const SectionHeader = ({ children }) => (
   <h2 className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-widest text-select-blue mb-3">
@@ -390,9 +391,10 @@ const buildInitialFormData = ({
   const activeGrade =
     initialQuote?.grade || presetData?.grade || cfg.grade || "premium";
   // Preserve an already-sent quote exactly on resend. New proposal/sample data
-  // receives the selected grade immediately.
+  // gets each scope mapped to its OWN grade (grade is chosen per scope item),
+  // falling back to the preset grade for any item without one.
   if (!initialQuote) {
-    scopeItems = mapScopeItemsToGrade(scopeItems, activeGrade);
+    scopeItems = scopeItems.map((s) => mapScopeItemToGrade(s, s.grade || activeGrade));
   }
 
   // Load inclusions/exclusions per category with legacy support
@@ -548,6 +550,9 @@ const QuoteModal = ({
 }) => {
   const isProposal = mode === "proposal";
   const isResend = !!initialQuote;
+  // The mapped scope of work is read-only only when first sending a proposal.
+  // On resend it's editable again so the quote can be revised.
+  const lockScope = isProposal && !isResend;
   const [presetKey, setPresetKey] = useState(() =>
     inferPresetKey(initialQuote, presetData),
   );
@@ -595,8 +600,8 @@ const QuoteModal = ({
     return new Promise((resolve, reject) => {
       const resolvedCategory = category || getCategoryFromItemName(itemName);
 
-      // Get ALL headings from Schedule Master (all room/category presets)
-      const scheduleHeadingNames = getRoomCategoryPresets().map((r) => r.name.trim().toUpperCase());
+      // Get ALL headings from the Proposal rooms list (all room presets)
+      const scheduleHeadingNames = getProposalRoomPresets().map((r) => r.name.trim().toUpperCase());
 
       // Collect ALL existing headings from scope items (not filtered by category)
       const existingHeadings = Array.from(
@@ -719,11 +724,14 @@ const QuoteModal = ({
   );
   const gradeOptions = useMemo(() => collectGrades(listLibrary()), []);
 
-  const handleGradeChange = (grade) => {
+  // Grade is chosen per scope item: re-map only the targeted row to the new
+  // grade (rate, materials & amount), leaving every other row untouched.
+  const handleScopeGradeChange = (idx, grade) => {
     setFormData((prev) => ({
       ...prev,
-      grade,
-      scopeItems: mapScopeItemsToGrade(prev.scopeItems, grade),
+      scopeItems: prev.scopeItems.map((s, i) =>
+        i === idx ? mapScopeItemToGrade(s, grade) : s,
+      ),
     }));
   };
 
@@ -778,7 +786,7 @@ const QuoteModal = ({
           ...s,
           materials: s.materials ? s.materials.map((m) => ({ ...m })) : [],
         })),
-        prev.grade || "premium",
+        null,
       ),
       inclusions: flatIn,
       exclusions: flatEx,
@@ -830,7 +838,7 @@ const QuoteModal = ({
           ...s,
           materials: s.materials ? s.materials.map((m) => ({ ...m })) : [],
         })),
-        prev.grade || "premium",
+        null,
       ),
       inclusions: flatIn,
       exclusions: flatEx,
@@ -1014,6 +1022,10 @@ const QuoteModal = ({
       });
       const newRow = {
         ...norm,
+        // Flag rows the user pulled in via "Pick from Library" so they stay
+        // editable even during a first proposal send, where the preset-mapped
+        // scope is otherwise locked.
+        _userAdded: true,
         length: lib.length != null ? Number(lib.length) : "",
         breadth: lib.breadth != null ? Number(lib.breadth) : "",
         height: lib.height != null ? Number(lib.height) : "",
@@ -1251,7 +1263,31 @@ const QuoteModal = ({
     showToast(firstError, "error");
   };
 
-  const previewQuote = buildQuote();
+  // Live Preview only: tag each scope item's name with its quality grade in
+  // shorthand brackets, e.g. "False Ceiling (Lu)". This is preview-only — the
+  // sent/printed quote (which builds its own quote object) is unaffected, and
+  // QuotePreview stays untouched (shared with the sample quote).
+  const gradeShorthand = (key) => {
+    const label = gradeOptions.find((g) => g.key === key)?.label || key || "";
+    if (!label) return "";
+    return label.charAt(0).toUpperCase() + (label.charAt(1) || "").toLowerCase();
+  };
+  const previewQuote = (() => {
+    const base = buildQuote();
+    return {
+      ...base,
+      scopeItems: (base.scopeItems || []).map((s) => {
+        const short = gradeShorthand(s.grade);
+        if (!short) return s;
+        return {
+          ...s,
+          itemName: `${s.itemName || ""} (${short})`,
+          // Keep the appended suffix through QuotePreview's master refresh.
+          isItemNameCustom: true,
+        };
+      }),
+    };
+  })();
 
   const footer = (
     <div className="flex flex-wrap justify-between items-center gap-3 modal-no-print">
@@ -1334,7 +1370,7 @@ const QuoteModal = ({
       maxHeight="h-[90vh]"
       bodyScrollable={false}
     >
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-6 h-full min-h-0">
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.25fr] gap-6 h-full min-h-0">
         {/* Form pane */}
         <div className="modal-no-print overflow-y-auto h-full pr-2 scroll-hidden-bar">
           {/* Preset is editable in standalone Quote mode but locked in
@@ -1378,33 +1414,6 @@ const QuoteModal = ({
               </p>
             </div>
           )}
-
-          <div className="mb-5">
-            <SectionHeader>Quality Grade</SectionHeader>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {gradeOptions.map((grade) => {
-                const active = (formData.grade || "premium") === grade.key;
-                return (
-                  <button
-                    key={grade.key}
-                    type="button"
-                    onClick={() => handleGradeChange(grade.key)}
-                    className={`px-3 py-1.5 rounded-lg text-[12px] font-semibold border transition-all cursor-pointer ${
-                      active
-                        ? "bg-select-blue text-white border-select-blue shadow-sm"
-                        : "bg-white text-text-muted border-bordergray hover:border-select-blue/40 hover:text-select-blue"
-                    }`}
-                  >
-                    {grade.label}
-                  </button>
-                );
-              })}
-            </div>
-            <p className="mt-2 text-[10px] text-text-muted">
-              {gradeLabel(formData.grade || "premium")} pricing is mapped from
-              configured Item Master rate build-ups; the quote updates automatically.
-            </p>
-          </div>
 
           <div className="border-t border-border my-5" />
 
@@ -1555,31 +1564,47 @@ const QuoteModal = ({
                         <span className="text-[11px] font-bold text-textcolor tabular-nums">
                           {formatAmount(group.total)}
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => setDeleteGroupConfirm(group.room)}
-                          className="p-1 rounded-md text-text-subtle hover:text-red-500 hover:bg-red-50 transition-all cursor-pointer"
-                          title={`Delete ${group.room} and all its items`}
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                        {!lockScope && (
+                          <button
+                            type="button"
+                            onClick={() => setDeleteGroupConfirm(group.room)}
+                            className="p-1 rounded-md text-text-subtle hover:text-red-500 hover:bg-red-50 transition-all cursor-pointer"
+                            title={`Delete ${group.room} and all its items`}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        )}
                       </div>
                     </div>
 
                     {/* Accordion Content */}
                     {groupOpen && (
                       <div className="p-3 space-y-3 bg-white">
-                        {group.rows.map(({ item, idx }) => (
+                        {group.rows.map(({ item, idx }) => {
+                          // Preset-mapped rows stay locked on a first proposal
+                          // send; rows added via "Pick from Library" remain
+                          // editable so they can be priced/described.
+                          const rowLocked = lockScope && !item._userAdded;
+                          return (
                           <div
                             key={idx}
                             className="rounded-lg border border-border bg-bg-soft/30 p-2 space-y-2"
                           >
                             <div className="grid grid-cols-[1fr_1.5fr_110px_28px] gap-2 items-start">
-                              <EditableItemNameInput
-                                initialValue={item.itemName || ""}
-                                onSave={(val) => updateScope(idx, "itemName", val)}
-                                className="bg-white border border-bordergray text-[11px] text-darkgray rounded-md px-2 py-2 w-full focus:outline-none focus:border-gray-300 focus:ring-1 focus:ring-gray-300"
-                              />
+                              {rowLocked ? (
+                                <div
+                                  className="bg-bg-soft border border-bordergray text-[11px] text-darkgray rounded-md px-2 py-2 w-full truncate"
+                                  title={item.itemName || ""}
+                                >
+                                  {item.itemName || "—"}
+                                </div>
+                              ) : (
+                                <EditableItemNameInput
+                                  initialValue={item.itemName || ""}
+                                  onSave={(val) => updateScope(idx, "itemName", val)}
+                                  className="bg-white border border-bordergray text-[11px] text-darkgray rounded-md px-2 py-2 w-full focus:outline-none focus:border-gray-300 focus:ring-1 focus:ring-gray-300"
+                                />
+                              )}
                               <input
                                 type="text"
                                 value={item.description || ""}
@@ -1587,7 +1612,12 @@ const QuoteModal = ({
                                   updateScope(idx, "description", e.target.value)
                                 }
                                 placeholder="Description"
-                                className="bg-white border border-bordergray text-[11px] text-darkgray rounded-md px-2 py-2 w-full focus:outline-none focus:border-gray-300 focus:ring-1 focus:ring-gray-300"
+                                readOnly={rowLocked}
+                                className={`border text-[11px] text-darkgray rounded-md px-2 py-2 w-full focus:outline-none ${
+                                  rowLocked
+                                    ? "bg-bg-soft border-bordergray cursor-default"
+                                    : "bg-white border-bordergray focus:border-gray-300 focus:ring-1 focus:ring-gray-300"
+                                }`}
                               />
                               <input
                                 type="number"
@@ -1596,7 +1626,12 @@ const QuoteModal = ({
                                   updateScope(idx, "amount", e.target.value)
                                 }
                                 placeholder="₹"
-                                className="bg-white border border-bordergray text-[11px] text-darkgray rounded-md px-2 py-2 w-full focus:outline-none focus:border-gray-300 focus:ring-1 focus:ring-gray-300 text-right"
+                                readOnly={rowLocked}
+                                className={`border text-[11px] text-darkgray rounded-md px-2 py-2 w-full focus:outline-none text-right ${
+                                  rowLocked
+                                    ? "bg-bg-soft border-bordergray cursor-default"
+                                    : "bg-white border-bordergray focus:border-gray-300 focus:ring-1 focus:ring-gray-300"
+                                }`}
                               />
                               <button
                                 type="button"
@@ -1608,14 +1643,37 @@ const QuoteModal = ({
                               </button>
                             </div>
 
-                            {/* Unit · rate · days meta */}
+                            {/* Qty · rate · days meta · per-scope grade */}
                             <div className="flex items-center gap-3 px-0.5 text-[10px] text-text-muted">
-                              <span className="font-semibold">{item.unit}</span>
+                              <span className="font-semibold">
+                                {Number(item.qty) > 0
+                                  ? `${Number(item.qty).toLocaleString("en-IN")} ${item.unit}`
+                                  : item.unit}
+                              </span>
                               <span>
                                 ₹{Number(item.rate || 0).toLocaleString("en-IN")}/
                                 {item.unit}
                               </span>
                               {(item.days ?? "") !== "" && <span>{item.days}d</span>}
+                              {gradeOptions.length > 0 && (
+                                <label className="flex items-center gap-1 ml-auto">
+                                  <span className="text-text-subtle">Grade</span>
+                                  <select
+                                    value={item.grade || "premium"}
+                                    onChange={(e) =>
+                                      handleScopeGradeChange(idx, e.target.value)
+                                    }
+                                    className="bg-white border border-bordergray text-[10px] text-darkgray rounded-md px-1.5 py-1 focus:outline-none focus:border-select-blue cursor-pointer"
+                                    title="Quality grade for this scope item"
+                                  >
+                                    {gradeOptions.map((g) => (
+                                      <option key={g.key} value={g.key}>
+                                        {g.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                              )}
                             </div>
 
                             {/* Material specs */}
@@ -1624,7 +1682,11 @@ const QuoteModal = ({
                                 {item.materials.map((m, mIdx) => (
                                   <div
                                     key={mIdx}
-                                    className="grid grid-cols-[100px_1fr_22px] gap-2 items-center"
+                                    className={`grid gap-2 items-center ${
+                                      rowLocked
+                                        ? "grid-cols-[100px_1fr]"
+                                        : "grid-cols-[100px_1fr_22px]"
+                                    }`}
                                   >
                                     <input
                                       type="text"
@@ -1633,7 +1695,12 @@ const QuoteModal = ({
                                         updateMaterial(idx, mIdx, "name", e.target.value)
                                       }
                                       placeholder="Plywood"
-                                      className="bg-white border border-bordergray text-[10px] text-darkgray rounded-md px-2 py-1.5 w-full focus:outline-none focus:border-gray-300 focus:ring-1 focus:ring-gray-300"
+                                      readOnly={rowLocked}
+                                      className={`border text-[10px] text-darkgray rounded-md px-2 py-1.5 w-full focus:outline-none ${
+                                        rowLocked
+                                          ? "bg-bg-soft border-bordergray cursor-default"
+                                          : "bg-white border-bordergray focus:border-gray-300 focus:ring-1 focus:ring-gray-300"
+                                      }`}
                                     />
                                     <input
                                       type="text"
@@ -1642,22 +1709,30 @@ const QuoteModal = ({
                                         updateMaterial(idx, mIdx, "spec", e.target.value)
                                       }
                                       placeholder="BWP 19mm"
-                                      className="bg-white border border-bordergray text-[10px] text-darkgray rounded-md px-2 py-1.5 w-full focus:outline-none focus:border-gray-300 focus:ring-1 focus:ring-gray-300"
+                                      readOnly={rowLocked}
+                                      className={`border text-[10px] text-darkgray rounded-md px-2 py-1.5 w-full focus:outline-none ${
+                                        rowLocked
+                                          ? "bg-bg-soft border-bordergray cursor-default"
+                                          : "bg-white border-bordergray focus:border-gray-300 focus:ring-1 focus:ring-gray-300"
+                                      }`}
                                     />
-                                    <button
-                                      type="button"
-                                      onClick={() => removeMaterial(idx, mIdx)}
-                                      className="h-7 w-6 flex items-center justify-center rounded-md text-text-subtle hover:text-red-500 hover:bg-red-50 transition-colors"
-                                      title="Remove material"
-                                    >
-                                      <Trash2 size={11} />
-                                    </button>
+                                    {!rowLocked && (
+                                      <button
+                                        type="button"
+                                        onClick={() => removeMaterial(idx, mIdx)}
+                                        className="h-7 w-6 flex items-center justify-center rounded-md text-text-subtle hover:text-red-500 hover:bg-red-50 transition-colors"
+                                        title="Remove material"
+                                      >
+                                        <Trash2 size={11} />
+                                      </button>
+                                    )}
                                   </div>
                                 ))}
                               </div>
                             )}
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -1704,9 +1779,9 @@ const QuoteModal = ({
           <div className="border-t border-border my-5" />
 
           <div className="mb-5">
-            <div className="flex justify-between gap-3 mb-4">
-              <div className="flex justify-between items-center">
-                <SectionHeader>Terms & Conditions</SectionHeader>
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <SectionHeader>Terms & Conditions</SectionHeader>
+              <div className="flex flex-wrap items-center gap-2">
                 {isResend && (
                   <button
                     type="button"
@@ -1744,14 +1819,12 @@ const QuoteModal = ({
                         exclusions: flatEx,
                       });
                     }}
-                    className="flex items-center gap-1 text-[11px] font-semibold text-amber-600 hover:text-amber-700 cursor-pointer"
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-amber-300 bg-amber-50 text-amber-600 text-[11.5px] font-bold hover:bg-amber-100 hover:text-amber-700 hover:shadow-sm transition-all cursor-pointer"
                     title="Restore default Terms & Conditions from the master module"
                   >
                     <RotateCcw size={12} /> Reset to Default
                   </button>
                 )}
-              </div>
-              <div className="flex flex-wrap gap-2 -mt-1.5">
                 <button
                   type="button"
                   onClick={() => setTermsParentModalOpen(true)}
@@ -2110,6 +2183,7 @@ const QuoteModal = ({
         headingsWithItem={destPrompt.headingsWithItem}
         onSelect={destPrompt.onSelect}
         onCreateNew={destPrompt.onCreateNew}
+        roomPresets={getProposalRoomPresets().map((r) => r.name)}
       />
 
       {deleteGroupConfirm && (

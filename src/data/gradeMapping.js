@@ -21,37 +21,45 @@ const findLibraryItem = (scope, library) => {
   );
 };
 
-// Apply an Item Master's composite grade rate to proposal rows without
-// changing their room, description, dimensions, assumed quantity, or identity.
-export const mapScopeItemsToGrade = (scopeItems = [], grade = "premium") => {
+// Apply an Item Master's composite grade rate to a single proposal row without
+// changing its room, description, dimensions, assumed quantity, or identity.
+export const mapScopeItemToGrade = (scope, grade = "premium") => {
   const library = listLibrary();
   const materialLookup = materialsById(listMaterials());
 
-  return scopeItems.map((scope) => {
-    const libraryItem = findLibraryItem(scope, library);
-    const recipes = libraryItem?.recipes || scope.recipes;
-    const recipe = recipes?.[grade];
-    if (!recipe) {
-      return { ...scope, grade };
-    }
+  const libraryItem = findLibraryItem(scope, library);
+  const recipes = libraryItem?.recipes || scope.recipes;
+  const recipe = recipes?.[grade];
+  if (!recipe) {
+    return { ...scope, grade };
+  }
 
-    const calculation = computeRecipe(recipe, materialLookup);
-    const rate = Math.round(calculation.rate || 0);
-    if (rate <= 0) return { ...scope, grade };
+  const calculation = computeRecipe(recipe, materialLookup);
+  const rate = Math.round(calculation.rate || 0);
+  if (rate <= 0) return { ...scope, grade };
 
-    const mappedMaterials = recipeToMaterials(recipe, materialLookup);
-    const updated = {
-      ...scope,
-      masterId: scope.masterId || libraryItem?.id || null,
-      recipes,
-      grade,
-      rate,
-      materials: mappedMaterials,
-    };
+  const mappedMaterials = recipeToMaterials(recipe, materialLookup);
+  const updated = {
+    ...scope,
+    masterId: scope.masterId || libraryItem?.id || null,
+    recipes,
+    grade,
+    rate,
+    materials: mappedMaterials,
+  };
 
-    return {
-      ...updated,
-      amount: computeLibraryItemAmount(updated),
-    };
-  });
+  return {
+    ...updated,
+    amount: computeLibraryItemAmount(updated),
+  };
+};
+
+// Apply an Item Master's composite grade rate to proposal rows without
+// changing their room, description, dimensions, assumed quantity, or identity.
+// When `grade` is null/undefined, each row keeps its own `grade` (falling back
+// to "premium"), so a quote can carry a different grade per scope item.
+export const mapScopeItemsToGrade = (scopeItems = [], grade = "premium") => {
+  return scopeItems.map((scope) =>
+    mapScopeItemToGrade(scope, grade ?? scope.grade ?? "premium"),
+  );
 };

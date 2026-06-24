@@ -33,7 +33,7 @@ import {
 } from "../../../data/designFlowStorage";
 import { listMaterials } from "../../../data/materialLibrary";
 import { listLibrary } from "../../../data/itemLibrary";
-import { computeAllGrades, materialsById, GRADES } from "../../../data/rateBuildup";
+import { collectGrades, computeRecipe, materialsById } from "../../../data/rateBuildup";
 import { storeFile, getFile, deleteFile } from "../../../utils/fileStorage";
 
 // Measurements + photos are normally captured on the field app and synced in
@@ -45,11 +45,14 @@ const formula = (unit, d) => {
   const info = DIMENSIONAL_UNITS[unit];
   const nos = Number(d?.nos) || 0;
   if (!info) return `${nos} ${unit}`;
+  // Dimensional works derive qty straight from L×B/L (no Nos multiplier), so
+  // only show "× nos" when an explicit count above 1 was entered.
+  const mult = nos > 1 ? ` × ${nos}` : "";
   if (info.kind === "length") {
-    return `${Number(d?.length) || 0} × ${nos || 1} = ${q.toLocaleString("en-IN")} ${unit}`;
+    return `${Number(d?.length) || 0}${mult} = ${q.toLocaleString("en-IN")} ${unit}`;
   }
   const second = Number(d?.breadth) || Number(d?.height) || 0;
-  return `${Number(d?.length) || 0} × ${second} × ${nos || 1} = ${q.toLocaleString("en-IN")} ${unit}`;
+  return `${Number(d?.length) || 0} × ${second}${mult} = ${q.toLocaleString("en-IN")} ${unit}`;
 };
 
 const genCustomId = () =>
@@ -76,6 +79,14 @@ const SurveyMeasurements = ({ site, onExpandPhoto }) => {
   const [designFlow, setDesignFlow] = useState(() => getDesignFlow(siteID));
   const [confirmOpen, setConfirmOpen] = useState(false);
   const designStarted = !!designFlow;
+
+  // No survey work can begin until a Site Incharge (supervisor) is assigned.
+  const supervisorAssigned = !!(site.supervisor && String(site.supervisor).trim());
+  const surveyLocked = !supervisorAssigned;
+  // Editing controls are inert when the survey is frozen (design started) OR
+  // before a supervisor is assigned. Controls are disabled outright — the
+  // banner explains why — so there are no blocking alerts to dismiss.
+  const editingLocked = designStarted || surveyLocked;
 
   useEffect(() => {
     const handler = () => {
@@ -117,24 +128,38 @@ const SurveyMeasurements = ({ site, onExpandPhoto }) => {
   const photoSrc = (image) =>
     typeof image === "string" ? image : photoUrls[image?.fileId] || "";
 
+  // Quality-grade options for a work, using the Proposal Master grade set (the
+  // same grades used there, including any custom grades). Every scope gets the
+  // full grade list so the dropdown is always selectable — even works without a
+  // rate build-up. Each grade's per-unit rate comes from its recipe when one
+  // exists, otherwise it falls back to the work's quoted rate.
   const materialOptionsFor = (el) => {
     const work =
       libraryList.find((item) => item.id === el.masterId) ||
       libraryList.find((item) => item.description === el.name);
-    if (!work?.recipes) return [];
-    const rates = computeAllGrades(work.recipes, materialLookup);
-    return GRADES.map((grade) => ({
-      id: `${work.id}:${grade.key}`,
-      name: `${grade.label} specification`,
-      specifications: `${work.description} · ${grade.label}`,
-      rate: Math.round(rates[grade.key] || 0),
-      unit: work.unit,
-      grade: grade.key,
-      materials: work.recipes[grade.key]?.components || [],
-    })).filter((option) => option.rate > 0);
+    const workId = work?.id || el.masterId || el.scopeItemId || el.name;
+    const recipes = work?.recipes || {};
+    const fallbackRate = Number(el.rate) || 0;
+    return collectGrades(libraryList).map((grade) => {
+      const recipe = recipes[grade.key];
+      const computed = recipe
+        ? Math.round(computeRecipe(recipe, materialLookup).rate || 0)
+        : 0;
+      const rate = computed > 0 ? computed : fallbackRate;
+      return {
+        id: `${workId}:${grade.key}`,
+        name: grade.label,
+        specifications: `${work?.description || el.name} · ${grade.label}`,
+        rate,
+        unit: work?.unit || el.unit,
+        grade: grade.key,
+        materials: recipe?.components || [],
+      };
+    });
   };
 
   const handleAddCustomItem = () => {
+    if (surveyLocked) return;
     const libItem = libraryList.find((it) => it.id === customItemLibId);
     if (!libItem || !customItemArea) return;
 
@@ -165,6 +190,7 @@ const SurveyMeasurements = ({ site, onExpandPhoto }) => {
   };
 
   const handleRemoveCustomItem = (areaName, el) => {
+    if (editingLocked) return;
     const next = readCustomItems(siteID).filter(
       (item) => item.id !== el.scopeItemId,
     );
@@ -187,7 +213,7 @@ const SurveyMeasurements = ({ site, onExpandPhoto }) => {
 
   // Demo: pull the field app's payload (per-work measurements + photos).
   const syncFromApp = () => {
-    if (designStarted) return; // frozen after handoff
+    if (editingLocked) return; // frozen after handoff or no supervisor yet
     const data = generateAppSurveyData(site);
     if (writeDims(siteID, data.dims)) setDims(data.dims);
     else alert("Survey measurements could not be saved. Please free browser storage and try again.");
@@ -212,6 +238,7 @@ const SurveyMeasurements = ({ site, onExpandPhoto }) => {
   const canMoveToDesign = state.complete && photosComplete && varianceOk;
 
   const moveToDesign = () => {
+    if (surveyLocked) return;
     const flow = startDesign(site, { areas, surveyState: state });
     setDesignFlow(flow);
     setConfirmOpen(false);
@@ -256,7 +283,9 @@ const SurveyMeasurements = ({ site, onExpandPhoto }) => {
             <button
               type="button"
               onClick={() => setShowAddCustomModal(true)}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-bg-soft hover:bg-bordergray text-darkgray text-[11px] font-semibold border border-bordergray transition-colors"
+              disabled={surveyLocked}
+              title={surveyLocked ? "Assign a Site Incharge first" : undefined}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-bg-soft hover:bg-bordergray text-darkgray text-[11px] font-semibold border border-bordergray transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-bg-soft"
             >
               <FiGrid size={11} /> Add Custom Item
             </button>
@@ -264,11 +293,13 @@ const SurveyMeasurements = ({ site, onExpandPhoto }) => {
           <button
             type="button"
             onClick={syncFromApp}
-            disabled={designStarted}
+            disabled={editingLocked}
             title={
               designStarted
                 ? "Survey is frozen — design has started"
-                : "Map the field app's survey data (measurements + photos)"
+                : surveyLocked
+                  ? "Assign a Site Incharge before syncing survey data"
+                  : "Map the field app's survey data (measurements + photos)"
             }
             className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-select-blue text-white text-[11px] font-semibold hover:bg-blue-950 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-select-blue"
           >
@@ -324,12 +355,15 @@ const SurveyMeasurements = ({ site, onExpandPhoto }) => {
             <button
               type="button"
               onClick={() => setConfirmOpen(true)}
+              disabled={surveyLocked}
               title={
-                canMoveToDesign
-                  ? "Freeze the survey and start the design pipeline"
-                  : "See what's still missing"
+                surveyLocked
+                  ? "Assign a Site Incharge first"
+                  : canMoveToDesign
+                    ? "Freeze the survey and start the design pipeline"
+                    : "See what's still missing"
               }
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-[11px] font-bold shadow-sm hover:shadow-md transition-all ${
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-[11px] font-bold shadow-sm hover:shadow-md transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
                 canMoveToDesign
                   ? "bg-linear-to-br from-violet-600 to-violet-800 text-white"
                   : "bg-bg-soft text-text-muted border border-bordergray"
@@ -340,6 +374,23 @@ const SurveyMeasurements = ({ site, onExpandPhoto }) => {
           )}
         </div>
       </div>
+
+      {/* Supervisor gate — no survey work until a Site Incharge is assigned. */}
+      {surveyLocked && (
+        <div className="mb-6 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+          <FiAlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-600" />
+          <div className="min-w-0 flex-1">
+            <p className="text-[13px] font-bold text-amber-900">
+              Assign a Site Incharge to begin the survey
+            </p>
+            <p className="text-[11px] text-amber-700/90 mt-0.5">
+              A supervisor must be assigned to this site before you can record
+              measurements, sync from the field app, add custom items, or move
+              to design. All survey actions are disabled until then.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Handoff banner — shown once the survey is frozen into design. */}
       {designStarted && (
@@ -441,14 +492,14 @@ const SurveyMeasurements = ({ site, onExpandPhoto }) => {
                     const materialOptions = materialOptionsFor(el);
 
                     const updateDim = (patch) => {
-                      if (designStarted) return;
+                      if (editingLocked) return;
                       const nextDims = { ...dims, [key]: { ...d, ...patch } };
                       if (writeDims(siteID, nextDims)) setDims(nextDims);
                       else alert("This survey change could not be saved. Please free browser storage and retry.");
                     };
 
                     const addPhotos = async (fileList) => {
-                      if (designStarted) return;
+                      if (editingLocked) return;
                       const files = Array.from(fileList || []);
                       if (files.length === 0) return;
                       const refs = [];
@@ -461,7 +512,7 @@ const SurveyMeasurements = ({ site, onExpandPhoto }) => {
                     };
 
                     const removePhoto = (idx) => {
-                      if (designStarted) return;
+                      if (editingLocked) return;
                       const removed = imgs[idx];
                       if (removed?.fileId) deleteFile(removed.fileId);
                       updateDim({ images: imgs.filter((_, i) => i !== idx) });
@@ -475,7 +526,7 @@ const SurveyMeasurements = ({ site, onExpandPhoto }) => {
                         <div className="flex items-center justify-between gap-3 mb-2">
                           <span className="flex items-center gap-2 text-[13px] font-semibold text-darkgray">
                             {el.name}
-                            {el.isCustom && !designStarted && (
+                            {el.isCustom && !editingLocked && (
                               <button
                                 type="button"
                                 onClick={() => handleRemoveCustomItem(area.area, el)}
@@ -502,7 +553,7 @@ const SurveyMeasurements = ({ site, onExpandPhoto }) => {
                               suffix={info.suffix}
                               value={d.length}
                               onChange={(v) => updateDim({ length: v })}
-                              disabled={designStarted}
+                              disabled={editingLocked}
                             />
                           )}
                           {isArea && (
@@ -512,39 +563,45 @@ const SurveyMeasurements = ({ site, onExpandPhoto }) => {
                                 suffix={info?.suffix}
                                 value={d.breadth}
                                 onChange={(v) => updateDim({ breadth: v, height: "" })}
-                                disabled={designStarted}
+                                disabled={editingLocked}
                               />
                               <DimInput
                                 label="Height (instead)"
                                 suffix={info?.suffix}
                                 value={d.height}
                                 onChange={(v) => updateDim({ height: v, breadth: "" })}
-                                disabled={designStarted}
+                                disabled={editingLocked}
                               />
                             </>
                           )}
-                          <DimInput
-                            label={isArea || isLength ? "Nos" : "Quantity"}
-                            value={d.nos}
-                            onChange={(v) => updateDim({ nos: v })}
-                            disabled={designStarted}
-                          />
+                          {/* Count-unit works (nos/ls/…) still need a quantity;
+                              dimensional works derive qty from L×B/L, so the
+                              "Nos" multiplier is dropped for them. */}
+                          {!isArea && !isLength && (
+                            <DimInput
+                              label="Quantity"
+                              value={d.nos}
+                              onChange={(v) => updateDim({ nos: v })}
+                              disabled={editingLocked}
+                            />
+                          )}
                         </div>
 
-                        {/* Material Specification Selection */}
+                        {/* Quality grade selection — grades from Proposal
+                            Master, each with its per-unit rate. */}
                         <div className="flex items-center gap-2 mb-3">
                           <label className="text-[11px] text-text-muted flex items-center gap-1.5 w-full">
-                            Work specification:
+                            Quality grade:
                             <select
                               value={d.selectedMaterial?.id || ""}
-                              disabled={designStarted || materialOptions.length === 0}
+                              disabled={editingLocked}
                               onChange={(e) => {
                                 const selectedMat = materialOptions.find((m) => m.id === e.target.value);
                                 updateDim({ selectedMaterial: selectedMat || null });
                               }}
                               className="rounded-md border border-bordergray bg-white px-2 py-1.5 text-[12px] text-darkgray focus:outline-none focus:border-select-blue disabled:bg-bg-soft disabled:text-text-subtle w-full max-w-[340px]"
                             >
-                              <option value="">-- Original proposal specification --</option>
+                              <option value="">-- Original proposal grade --</option>
                               {materialOptions.map((m) => (
                                 <option key={m.id} value={m.id}>
                                   {m.name} · ₹{m.rate}/{m.unit}
@@ -568,7 +625,7 @@ const SurveyMeasurements = ({ site, onExpandPhoto }) => {
                                   className="w-full h-16 object-cover rounded-md border border-bordergray cursor-pointer hover:opacity-90"
                                 />
                               )}
-                              {!designStarted && (
+                              {!editingLocked && (
                                 <button
                                   type="button"
                                   onClick={() => removePhoto(i)}
@@ -580,7 +637,7 @@ const SurveyMeasurements = ({ site, onExpandPhoto }) => {
                               )}
                             </div>
                           );})}
-                          {!designStarted && (
+                          {!editingLocked && (
                             <label
                               title="Add photo"
                               className="h-16 rounded-md border border-dashed border-bordergray flex items-center justify-center cursor-pointer text-text-subtle hover:border-select-blue hover:text-select-blue transition-colors"

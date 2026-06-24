@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { X, Plus, Folder, AlertCircle, Lock, Search } from "lucide-react";
 import {
-  getScheduleHeadings,
   getCategoryFromHeading,
   addScheduleHeading,
   getRoomCategoryPresets,
@@ -9,7 +8,9 @@ import {
 
 /**
  * Reusable modal for selecting a destination heading or creating a new one.
- * Uses Room / Category Presets from Schedule Master (single source of truth).
+ * The preset list defaults to the Schedule Master scope presets, but callers
+ * can override it via `roomPresets` (the Proposal Master passes its room list
+ * so this prompt offers rooms, not scopes).
  *
  * Shows ALL available headings from ALL categories so users can assign scopes
  * from one category to another category heading. The "Create New" form still
@@ -27,6 +28,9 @@ const DestinationPromptModal = ({
   headingsWithItem = [],
   onSelect,
   onCreateNew,
+  // Optional list of preset heading names. When provided, replaces the
+  // Schedule Master scope presets fetched internally.
+  roomPresets = null,
 }) => {
   const [newHeadingSuffix, setNewHeadingSuffix] = useState("");
   const [error, setError] = useState("");
@@ -46,9 +50,9 @@ const DestinationPromptModal = ({
   // This allows cross-category assignment (e.g. placing Living Room scope
   // under Dining Area heading).
   const scheduleHeadings = useMemo(() => {
-    const presets = getRoomCategoryPresets();
-    return presets.map((r) => r.name);
-  }, []);
+    if (roomPresets) return roomPresets;
+    return getRoomCategoryPresets().map((r) => r.name);
+  }, [roomPresets]);
 
   // Merge schedule headings with existing scope headings (deduplicated)
   const allHeadings = useMemo(() => {

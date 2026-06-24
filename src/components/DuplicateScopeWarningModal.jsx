@@ -63,7 +63,7 @@ const DuplicateScopeWarningModal = ({
               </span>
             </div>
             <p className="text-[11.5px] text-text-muted pt-1">
-              Do you want to add it again under a different heading?
+              Do you want to add it again anyway?
             </p>
           </div>
         </div>

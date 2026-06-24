@@ -7,12 +7,25 @@
 // Status is DERIVED from those dates (not manually set); health/escalation
 // derive from the Master → Schedule config.
 //
+// Durations, timelines and possession math are all in DAYS. Each room also
+// carries `shiftsPerDay` — shifts worked per day (sourced from the Schedule
+// Master, the single source for shift requirements). This is an independent
+// execution-planning dimension:
+//   • Total Planned Shifts = days × shiftsPerDay (team allocation).
+//   • Progress = shiftsDone / totalPlanned × 100.
+// shiftsPerDay does NOT change the day-based timeline.
+//
 // Stored shape: { workStart: "YYYY-MM-DD" | "", rooms: [ {id, room, description,
-// days, owner, status, note} ] }  — array order IS the sequence.
+// days, shiftsPerDay, shiftsDone, owner, status, note} ] } — array order IS the
+// sequence.
 
 import { getConfigForType, getLatestQuoteForParent } from "./QuotePresets";
 import { getMilestonesForLead } from "./LeadStatusConfig";
-import { getScheduleConfig, getEscalationRole } from "./scheduleConfig";
+import {
+  getScheduleConfig,
+  getEscalationRole,
+  getRoomDefaultShiftsPerDay,
+} from "./scheduleConfig";
 
 const key = (proposalId) => `projectSchedule_${proposalId}`;
 
@@ -39,7 +52,9 @@ export function makeRoom(partial = {}) {
     id: newId(),
     room: "",
     description: "",
-    days: "",
+    days: "", // working days — drives the timeline
+    shiftsPerDay: "", // shifts worked per day (from Schedule Master); planning only
+    shiftsDone: 0, // shifts completed so far — progress tracking
     owner: "",
     status: cfg.statuses[0] || "Not Started",
     done: false, // manual override: marks a room complete regardless of dates
@@ -68,24 +83,42 @@ export function seedRoomsFromProposal(lead) {
     byRoom.get(room).push(s);
   }
 
-  return [...byRoom.entries()].map(([room, works]) =>
-    makeRoom({
+  return [...byRoom.entries()].map(([room, works]) => {
+    // Each work carries its own days (timeline) and shiftsPerDay (execution
+    // rate). shiftsPerDay comes from the work's own value if present, else the
+    // Schedule Master default for that scope name.
+    const workRows = works.map((w) => {
+      const name = w.itemName || w.description || "Work";
+      const shiftsPerDay =
+        w.shiftsPerDay != null && w.shiftsPerDay !== ""
+          ? Number(w.shiftsPerDay) || 0
+          : Number(getRoomDefaultShiftsPerDay(name)) || 0;
+      return { name, days: Number(w.days) || 0, shiftsPerDay };
+    });
+    const roomDays = workRows.reduce((sum, w) => sum + (Number(w.days) || 0), 0);
+    // Total Planned Shifts across the room's works = Σ (days × shiftsPerDay).
+    const totalPlanned = workRows.reduce(
+      (sum, w) => sum + (Number(w.days) || 0) * (Number(w.shiftsPerDay) || 0),
+      0,
+    );
+    // Representative room rate so a single number can be shown; getRoomShiftPlan
+    // still derives the exact total from the works.
+    const roomShiftsPerDay = roomDays > 0 ? Math.round(totalPlanned / roomDays) : 0;
+    return makeRoom({
       room,
-      // The individual works under this room, each with its own days — the
-      // schedule lists them below the room heading.
-      works: works.map((w) => ({
-        name: w.itemName || w.description || "Work",
-        days: Number(w.days) || 0,
-      })),
+      // The individual works under this room, each with its own days/shiftsPerDay
+      // — the schedule lists them below the room heading.
+      works: workRows,
       // Room duration = sum of its works' days (done in sequence within the room).
-      days: works.reduce((sum, w) => sum + (Number(w.days) || 0), 0) || "",
+      days: roomDays || "",
+      shiftsPerDay: roomShiftsPerDay || "",
       status: status0,
       amount: works.reduce((sum, w) => sum + (Number(w.amount) || 0), 0),
       materials: works.flatMap((w) => w.materials || []),
       quantity: `${works.length} work${works.length === 1 ? "" : "s"}`,
       measurement: "—",
-    }),
-  );
+    });
+  });
 }
 
 // Saved schedule, or a seeded (unsaved) one. Pure — no write during render.
@@ -118,13 +151,6 @@ export function getOrSeedSchedule(lead) {
 // ── Working-day math ─────────────────────────────────────────────────────────
 // Every day counts — Sundays are now included in schedule calculations.
 const isNonWorkingDay = () => false;
-
-// Work now runs on a SHIFT basis — 3 shifts per calendar day. A room's `days`
-// value is the work content in shift-units; with 3 shifts worked each day it
-// takes ceil(days / 3) calendar days on the timeline.
-export const SHIFTS_PER_DAY = 3;
-const shiftsToCalendarDays = (shifts) =>
-  Math.max(0, Math.ceil((Number(shifts) || 0) / SHIFTS_PER_DAY));
 
 function nextWorkingDay(date) {
   const d = new Date(date);
@@ -214,13 +240,11 @@ export function computeChain(rooms, anchorDate) {
   if (!anchorDate) return rooms.map((r) => ({ ...r, start: null, end: null }));
   const start0 = nextWorkingDay(anchorDate);
   return rooms.map((r) => {
-    // `days` is the work content in shift-units; convert to calendar days at
-    // SHIFTS_PER_DAY shifts/day to lay the room out on the timeline.
-    const calendarDays = shiftsToCalendarDays(r.days);
-    if (calendarDays <= 0) return { ...r, start: null, end: null };
+    // Timeline is driven by `days` (working days) — unchanged by shifts.
+    const days = Math.max(0, Number(r.days) || 0);
+    if (days <= 0) return { ...r, start: null, end: null };
     const start = new Date(start0);
-    const end =
-      calendarDays > 1 ? addWorkingDays(start, calendarDays - 1) : new Date(start);
+    const end = days > 1 ? addWorkingDays(start, days - 1) : new Date(start);
     return { ...r, start, end };
   });
 }
@@ -241,6 +265,54 @@ export function deriveStatus(room, started = true) {
 export function getProjectEnd(chain) {
   const ends = chain.map((r) => r.end).filter(Boolean);
   return ends.length ? new Date(Math.max(...ends.map((d) => d.getTime()))) : null;
+}
+
+// ── Shift-based execution planning & progress ───────────────────────────────
+// shiftsPerDay (from the Schedule Master) is the execution rate, kept SEPARATE
+// from the day-based timeline. It answers two questions the timeline can't:
+//   • team allocation — shiftsPerDay shifts (teams) run per working day, giving
+//     Total Planned Shifts = days × shiftsPerDay. When a room groups several
+//     works, the total is the exact Σ (work.days × work.shiftsPerDay).
+//   • progress — `shiftsDone` of Total Planned Shifts completed.
+
+export function getRoomShiftPlan(room) {
+  const days = Math.max(0, Number(room?.days) || 0);
+  // Prefer the exact per-work total when the room groups works; otherwise fall
+  // back to the room-level rate × days.
+  const works = Array.isArray(room?.works) ? room.works : null;
+  const totalPlanned = works?.length
+    ? works.reduce(
+        (sum, w) => sum + (Number(w.days) || 0) * (Number(w.shiftsPerDay) || 0),
+        0,
+      )
+    : days * Math.max(0, Number(room?.shiftsPerDay) || 0);
+  // Representative rate for display (exact when the works share one rate).
+  const shiftsPerDay =
+    days > 0 ? Math.round(totalPlanned / days) : Math.max(0, Number(room?.shiftsPerDay) || 0);
+  return { days, shiftsPerDay, totalPlanned };
+}
+
+export function getRoomShiftProgress(room) {
+  const { totalPlanned } = getRoomShiftPlan(room);
+  // A room flagged done is 100% regardless of the recorded count.
+  const done = room?.done
+    ? totalPlanned
+    : Math.min(totalPlanned, Math.max(0, Number(room?.shiftsDone) || 0));
+  const pct = totalPlanned > 0 ? Math.round((done / totalPlanned) * 100) : 0;
+  return { done, total: totalPlanned, pct };
+}
+
+// Project-level shift roll-up across all rooms (for progress tracking).
+export function getProjectShiftSummary(rooms) {
+  return (rooms || []).reduce(
+    (acc, r) => {
+      const { done, total } = getRoomShiftProgress(r);
+      acc.done += done;
+      acc.total += total;
+      return acc;
+    },
+    { done: 0, total: 0 },
+  );
 }
 
 export const RAG_CHIP = {

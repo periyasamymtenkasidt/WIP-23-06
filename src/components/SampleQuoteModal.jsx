@@ -39,10 +39,8 @@ import {
 import {
   computeLibraryItemAmount,
   computeLibraryItemArea,
-  listLibrary,
 } from "../data/itemLibrary";
 import { mapScopeItemsToGrade } from "../data/gradeMapping";
-import { collectGrades, gradeLabel } from "../data/rateBuildup";
 import DestinationPromptModal from "./DestinationPromptModal";
 import { formatAmount } from "../utils/formatAmount";
 import { formatSizeRange } from "../utils/sizeRangeValidation";
@@ -59,7 +57,8 @@ import {
 import { roomColor } from "../data/categoryColors";
 import CategorySelect from "./CategorySelect";
 import LibraryPickerModal from "./LibraryPickerModal";
-import { getRoomDefaultDays, getRoomCategoryPresets } from "../data/scheduleConfig";
+import { getRoomDefaultDays } from "../data/scheduleConfig";
+import { getProposalRoomPresets } from "../data/proposalRooms";
 
 // ── Section Header ──────────────────────────────────────────────────────────
 const SectionHeader = ({ children }) => (
@@ -146,8 +145,9 @@ const buildSampleQuoteData = ({
       }));
 
   scopeItems = refreshScopeItemsFromMaster(scopeItems, activePresetKey, activePropertyType);
-  const activeGrade = presetData?.grade || cfg.grade || "premium";
-  scopeItems = mapScopeItemsToGrade(scopeItems, activeGrade);
+  // Sample quotes always price the scope of work at the economy grade.
+  const activeGrade = "economy";
+  scopeItems = mapScopeItemsToGrade(scopeItems, "economy");
   // Load inclusions/exclusions per category with legacy support
   const categoryInclusions = {};
   const categoryExclusions = {};
@@ -344,8 +344,8 @@ Digital Atelier`);
     return new Promise((resolve, reject) => {
       const resolvedCategory = category || getCategoryFromItemName(itemName);
 
-      // Get ALL headings from Schedule Master (all room/category presets)
-      const scheduleHeadingNames = getRoomCategoryPresets().map((r) => r.name.trim().toUpperCase());
+      // Get ALL headings from the Proposal rooms list (all room presets)
+      const scheduleHeadingNames = getProposalRoomPresets().map((r) => r.name.trim().toUpperCase());
 
       // Collect ALL existing headings from scope items (not filtered by category)
       const existingHeadings = Array.from(
@@ -446,15 +446,6 @@ Digital Atelier`);
     () => computeTotals(formData.scopeItems),
     [formData.scopeItems],
   );
-  const gradeOptions = useMemo(() => collectGrades(listLibrary()), []);
-
-  const handleGradeChange = (grade) => {
-    setFormData((prev) => ({
-      ...prev,
-      grade,
-      scopeItems: mapScopeItemsToGrade(prev.scopeItems, grade),
-    }));
-  };
 
   const [openGroups, setOpenGroups] = useState({});
   const toggleGroup = (room) => {
@@ -851,33 +842,6 @@ Digital Atelier`);
                 Sample Quote
               </span>
             </div>
-          </div>
-
-          <div className="mb-5">
-            <SectionHeader>Quality Grade</SectionHeader>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {gradeOptions.map((grade) => {
-                const active = (formData.grade || "premium") === grade.key;
-                return (
-                  <button
-                    key={grade.key}
-                    type="button"
-                    onClick={() => handleGradeChange(grade.key)}
-                    className={`px-3 py-1.5 rounded-lg text-[12px] font-semibold border transition-all cursor-pointer ${
-                      active
-                        ? "bg-select-blue text-white border-select-blue shadow-sm"
-                        : "bg-white text-text-muted border-bordergray hover:border-select-blue/40 hover:text-select-blue"
-                    }`}
-                  >
-                    {grade.label}
-                  </button>
-                );
-              })}
-            </div>
-            <p className="mt-2 text-[10px] text-text-muted">
-              {gradeLabel(formData.grade || "premium")} pricing is mapped from
-              configured Item Master rate build-ups; the sample quote updates automatically.
-            </p>
           </div>
 
           <div className="border-t border-border my-5" />
@@ -1583,6 +1547,7 @@ Digital Atelier`);
         headingsWithItem={destPrompt.headingsWithItem}
         onSelect={destPrompt.onSelect}
         onCreateNew={destPrompt.onCreateNew}
+        roomPresets={getProposalRoomPresets().map((r) => r.name)}
       />
 
       {deleteGroupConfirm && (

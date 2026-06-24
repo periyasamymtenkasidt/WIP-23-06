@@ -22,6 +22,9 @@ import {
   getBreachDays,
   RAG_CHIP,
   seedRoomsFromProposal,
+  getRoomShiftPlan,
+  getRoomShiftProgress,
+  getProjectShiftSummary,
 } from "../../data/scheduleStorage";
 import { FiRefreshCw } from "react-icons/fi";
 
@@ -54,6 +57,17 @@ const RoomModal = ({ room, started, onSave, onClose }) => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const canMarkDone = started && !!roomStart && roomStart <= today;
+
+  // Shift-based execution planning & progress (kept separate from the timeline).
+  const plan = getRoomShiftPlan(form);
+  const progress = getRoomShiftProgress(form);
+  const setShiftsDone = (value) => {
+    const n = Math.max(
+      0,
+      Math.min(plan.totalPlanned, Math.round(Number(value) || 0)),
+    );
+    set("shiftsDone", n);
+  };
 
   const handleSave = () => {
     // start/end are derived in computeChain — never persist them.
@@ -99,17 +113,88 @@ const RoomModal = ({ room, started, onSave, onClose }) => {
                 {form.days} working day{Number(form.days) === 1 ? "" : "s"}
               </span>
             ) : null}
+            {plan.totalPlanned > 0 ? (
+              <span className="ml-2 text-[12px] font-medium text-select-blue">
+                · {plan.totalPlanned} planned shift
+                {plan.totalPlanned === 1 ? "" : "s"}
+              </span>
+            ) : null}
           </p>
           {form.description && (
             <p className="text-[12px] text-text-muted mt-0.5">
               {form.description}
             </p>
           )}
+          {plan.totalPlanned > 0 && (
+            <p className="text-[11px] text-text-muted mt-1">
+              Team allocation:{" "}
+              <span className="font-semibold text-textcolor">
+                {plan.shiftsPerDay} shift{plan.shiftsPerDay === 1 ? "" : "s"}/day
+              </span>{" "}
+              × {plan.days} day{plan.days === 1 ? "" : "s"} ={" "}
+              <span className="font-semibold text-textcolor">
+                {plan.totalPlanned} planned shift
+                {plan.totalPlanned === 1 ? "" : "s"}
+              </span>
+              .
+            </p>
+          )}
           <p className="text-[10.5px] text-text-subtle mt-1.5">
-            Scope &amp; duration come from the proposal and aren&apos;t edited
-            here.
+            Scope, duration &amp; shifts/day come from the proposal / Schedule
+            Master and aren&apos;t edited here.
           </p>
         </div>
+
+        {/* Execution progress — completed shifts ÷ total planned (timeline-free) */}
+        {plan.totalPlanned > 0 && (
+          <div className="rounded-lg border border-bordergray px-3 py-2.5">
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="text-[12px] font-semibold text-textcolor">
+                Shift progress
+              </p>
+              <span className="text-[11px] font-semibold text-text-muted tabular-nums">
+                {progress.done} / {progress.total} · {progress.pct}%
+              </span>
+            </div>
+            <div className="h-1.5 w-full rounded-full bg-bg-soft overflow-hidden">
+              <div
+                className="h-full rounded-full bg-select-blue transition-all"
+                style={{ width: `${progress.pct}%` }}
+              />
+            </div>
+            <div className="flex items-center gap-2 mt-2">
+              <button
+                type="button"
+                onClick={() => setShiftsDone(progress.done - 1)}
+                disabled={!!form.done || progress.done <= 0}
+                className="h-7 w-7 flex items-center justify-center rounded-lg border border-bordergray text-textcolor hover:bg-bg-soft disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                −
+              </button>
+              <input
+                type="number"
+                min={0}
+                max={plan.totalPlanned}
+                value={form.done ? plan.totalPlanned : form.shiftsDone || 0}
+                disabled={!!form.done}
+                onChange={(e) => setShiftsDone(e.target.value)}
+                className="w-16 rounded-lg border border-bordergray px-2 py-1.5 text-[12px] text-textcolor text-center focus:outline-none focus:border-select-blue disabled:bg-bg-soft disabled:cursor-not-allowed"
+              />
+              <button
+                type="button"
+                onClick={() => setShiftsDone(progress.done + 1)}
+                disabled={!!form.done || progress.done >= plan.totalPlanned}
+                className="h-7 w-7 flex items-center justify-center rounded-lg border border-bordergray text-textcolor hover:bg-bg-soft disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                +
+              </button>
+              <span className="text-[11px] text-text-subtle">
+                of {plan.totalPlanned} shifts completed
+                {form.done ? " · room marked done" : ""}
+              </span>
+            </div>
+          </div>
+        )}
 
         <label
           className={`flex items-center gap-3 rounded-lg border border-bordergray px-3 py-2.5 select-none transition-colors ${
@@ -206,6 +291,11 @@ const ProjectSchedule = ({ lead }) => {
       ).length
     : 0;
   const projectEnd = useMemo(() => getProjectEnd(chain), [chain]);
+  // Shift roll-up for progress tracking (independent of the day-based timeline).
+  const shiftSummary = useMemo(
+    () => getProjectShiftSummary(schedule.rooms),
+    [schedule.rooms],
+  );
 
   // ── Confirm work-start (explicit save + activity log) ──────────────────────
   // The schedule anchors to the *saved* workStart; edits stay in draft state
@@ -425,6 +515,11 @@ const ProjectSchedule = ({ lead }) => {
                 <span className="font-semibold text-darkgray">
                   {fmt(projectEnd)}
                 </span>
+              </span>
+            )}
+            {shiftSummary.total > 0 && (
+              <span className="ml-1">
+                · {shiftSummary.done}/{shiftSummary.total} shifts done
               </span>
             )}
             {overdue > 0 && (
@@ -818,6 +913,8 @@ const ProjectSchedule = ({ lead }) => {
                 started || status === "Done"
                   ? getRoomHealth(r.end, status, config)
                   : { rag: "none", label: "Awaiting booking" };
+              const plan = getRoomShiftPlan(r);
+              const prog = getRoomShiftProgress(r);
               return (
                 <div
                   key={r.id}
@@ -865,7 +962,29 @@ const ProjectSchedule = ({ lead }) => {
                           set duration
                         </span>
                       )}
+                      {plan.totalPlanned > 0 && (
+                        <span className="ml-2 text-[11px] font-medium text-select-blue">
+                          {plan.totalPlanned} shift
+                          {plan.totalPlanned === 1 ? "" : "s"}
+                          {plan.shiftsPerDay > 1
+                            ? ` · ${plan.shiftsPerDay}/day`
+                            : ""}
+                        </span>
+                      )}
                     </p>
+                    {plan.totalPlanned > 0 && (
+                      <div className="mt-1 flex items-center gap-1.5 max-w-[200px]">
+                        <div className="h-1 flex-1 rounded-full bg-bg-soft overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-select-blue"
+                            style={{ width: `${prog.pct}%` }}
+                          />
+                        </div>
+                        <span className="text-[10px] font-semibold text-text-subtle tabular-nums shrink-0">
+                          {prog.done}/{prog.total}
+                        </span>
+                      </div>
+                    )}
                     {r.works?.length ? (
                       <div className="mt-1 space-y-0.5">
                         {r.works.map((w, i) => (

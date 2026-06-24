@@ -218,8 +218,8 @@ const QuotePreview = ({ quote }) => {
                         <td className="py-4 px-2 text-center italic">
                           {item.unit || "sqft"}
                         </td>
-                        <td className="py-4 px-2 text-center">
-                          {qty.toFixed(1)}
+                        <td className="py-4 px-2 text-center whitespace-nowrap">
+                          {qty.toFixed(1)} {item.unit || "sqft"}
                         </td>
                         <td className="py-4 px-2 text-center">
                           {formatAmount(rate)}

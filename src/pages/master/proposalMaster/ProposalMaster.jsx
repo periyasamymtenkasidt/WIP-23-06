@@ -53,6 +53,7 @@ import {
   cleanSizeRange,
 } from "../../../utils/sizeRangeValidation";
 import { DIMENSIONAL_UNITS } from "../../../data/boqStorage";
+import { UNITS } from "../../../data/boqUnits";
 import {
   assignCategoryNames,
   addScopeItemsWithDuplicateCheck,
@@ -760,7 +761,7 @@ const ProposalMaster = () => {
           return target;
         });
 
-      if (key === "area") {
+      if (key === "area" || key === "rate" || key === "unit") {
         return recalculateConfigScope(cfg, scopeItems);
       }
 
@@ -773,32 +774,10 @@ const ProposalMaster = () => {
 
   // Save handler for the shared Item Form modal opened by "Add Scope".
   const handleScopeFormSave = (formOrArray) => {
-    const activeScopeItems = activeConfig?.scopeItems || [];
-    const checkDuplicate = (heading, itemName, excludeIdx = null) => {
-      const h = heading.trim().toUpperCase();
-      const n = itemName.trim().toLowerCase();
-      return activeScopeItems.some((s, idx) => {
-        if (excludeIdx !== null && idx === excludeIdx) return false;
-        return (
-          (s.area || s.heading || "").trim().toUpperCase() === h &&
-          (s.itemName || "").trim().toLowerCase() === n
-        );
-      });
-    };
-
+    // Duplicates (same item under the same heading) are allowed — the Item
+    // Form already confirms them with the user before saving, so this just
+    // persists whatever it receives.
     if (Array.isArray(formOrArray)) {
-      for (const form of formOrArray) {
-        const heading = form.heading || form.description || "";
-        const itemName = form.itemName || form.description || "";
-        if (checkDuplicate(heading, itemName)) {
-          showToast(
-            `"${itemName}" already exists under heading "${heading.toUpperCase()}".`,
-            "error",
-          );
-          return;
-        }
-      }
-
       const newRows = formOrArray.map((form) => {
         const computed = computeLibraryItemAmount(form);
         const amount = computed || Number(form.rate) || 0;
@@ -860,14 +839,6 @@ const ProposalMaster = () => {
         form.days !== "" && form.days != null
           ? Number(form.days)
           : getRoomDefaultDays(area);
-
-      if (checkDuplicate(heading, itemName, editingScopeIdx)) {
-        showToast(
-          `"${itemName}" already exists under heading "${heading.toUpperCase()}".`,
-          "error",
-        );
-        return;
-      }
 
       if (editingScopeIdx != null) {
         setConfigField((cfg) => {
@@ -2087,6 +2058,15 @@ const ProposalMaster = () => {
                                       className={`${inputBase} min-w-0 flex-1 resize-none`}
                                         rows={1}
                                      />
+                                    <div className="w-36 shrink-0">
+                                      <AmountInput
+                                        value={item.amount}
+                                        onChange={(v) =>
+                                          updateScope(idx, "amount", v)
+                                        }
+                                        pct={pct}
+                                      />
+                                    </div>
                                     <button
                                       type="button"
                                       onClick={() => removeScopeRow(idx)}
@@ -2096,45 +2076,91 @@ const ProposalMaster = () => {
                                       <Trash2 size={13} />
                                     </button>
                                   </div>
-                                  <div className="flex items-center gap-2 pl-[60px]">
-                                    <div
-                                      className="relative w-24 shrink-0"
-                                      title="Default duration in days — seeds the project schedule"
-                                    >
-                                      <input
-                                        type="number"
-                                        min={0}
-                                        value={item.days ?? ""}
-                                        onChange={(e) =>
-                                          updateScope(idx, "days", e.target.value)
-                                        }
-                                        placeholder="Days"
-                                        className={`${inputBase} pr-8 text-center tabular-nums`}
-                                      />
-                                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-text-subtle pointer-events-none">
-                                        d
-                                      </span>
-                                    </div>
-                                    <div className="w-44 shrink-0">
-                                      <AmountInput
-                                        value={item.amount}
-                                        onChange={(v) =>
-                                          updateScope(idx, "amount", v)
-                                        }
-                                        pct={pct}
-                                      />
+                                  <div className="pl-[60px] space-y-2">
+                                    <div className="grid grid-cols-[1fr_1fr_110px] gap-3 items-end">
+                                      {/* UNIT */}
+                                      <div>
+                                        <label className="block text-[9px] font-semibold uppercase tracking-wider text-text-muted mb-1">
+                                          Unit
+                                        </label>
+                                        <select
+                                          value={item.unit || "sqft"}
+                                          onChange={(e) =>
+                                            updateScope(idx, "unit", e.target.value)
+                                          }
+                                          className={`${inputBase} cursor-pointer`}
+                                        >
+                                          {UNITS.map((u) => (
+                                            <option key={u.code} value={u.code}>
+                                              {u.label}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </div>
+                                      {/* RATE */}
+                                      <div>
+                                        <label className="block text-[9px] font-semibold uppercase tracking-wider text-text-muted mb-1">
+                                          Rate (₹)
+                                        </label>
+                                        <div className="relative">
+                                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-subtle text-[11px] pointer-events-none">
+                                            ₹
+                                          </span>
+                                          <input
+                                            type="number"
+                                            min={0}
+                                            value={item.rate ?? ""}
+                                            onChange={(e) =>
+                                              updateScope(idx, "rate", e.target.value)
+                                            }
+                                            placeholder="Rate"
+                                            className={`${inputBase} pl-6 tabular-nums`}
+                                          />
+                                        </div>
+                                      </div>
+                                      {/* DAYS */}
+                                      <div
+                                        title="Default duration in days — seeds the project schedule"
+                                      >
+                                        <label className="block text-[9px] font-semibold uppercase tracking-wider text-text-muted mb-1">
+                                          Days
+                                        </label>
+                                        <div className="relative">
+                                          <input
+                                            type="number"
+                                            min={0}
+                                            value={item.days ?? ""}
+                                            onChange={(e) =>
+                                              updateScope(idx, "days", e.target.value)
+                                            }
+                                            placeholder="Days"
+                                            className={`${inputBase} pr-7 text-center tabular-nums`}
+                                          />
+                                          <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-text-subtle pointer-events-none">
+                                            d
+                                          </span>
+                                        </div>
+                                      </div>
                                     </div>
                                     {activeConfig?.enableFormulaEstimator && (
-                                      <div
-                                        className="min-w-[132px] text-[9.5px] leading-4 text-text-subtle tabular-nums"
-                                        title={`Formula: ${item.qtyFormula || defaultQtyFormulaForItem(item)}`}
-                                      >
-                                        <div className="font-semibold text-text-muted">
-                                          Qty {Number(item.qty || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })} {item.unit || "unit"}
-                                        </div>
-                                        <div>
-                                          Base {Number(item.estimatorBaseQty || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}
-                                        </div>
+                                      <div className="flex items-center justify-between rounded-lg bg-bg-soft/60 border border-bordergray/60 px-3 py-1.5">
+                                        <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+                                          Calculated Quantity
+                                        </span>
+                                        <span className="text-[11px] font-bold text-textcolor tabular-nums">
+                                          {Number(item.qty || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })} {item.unit || "unit"}
+                                          {(() => {
+                                            const split =
+                                              activeConfig?.roomAllocations?.[
+                                                scopeRoomKey(item)
+                                              ];
+                                            return split != null ? (
+                                              <span className="ml-1.5 text-[9.5px] font-normal text-text-subtle">
+                                                ({split}% split)
+                                              </span>
+                                            ) : null;
+                                          })()}
+                                        </span>
                                       </div>
                                     )}
                                   </div>

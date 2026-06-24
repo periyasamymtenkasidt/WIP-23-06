@@ -32,21 +32,29 @@ const Card = ({ title, icon, badge, children }) => (
   </div>
 );
 
-// Editable room/category list with a default-days field per row.
+// Editable scope list — each row has a default-days field (drives the timeline)
+// and a shifts/day rate (drives execution planning / team allocation / progress).
+// Total Planned Shifts = days × shifts/day is shown read-only per row.
 const RoomDaysList = ({ items, onChange }) => {
   const update = (idx, key, value) =>
     onChange(items.map((it, i) => (i === idx ? { ...it, [key]: value } : it)));
   const remove = (idx) => onChange(items.filter((_, i) => i !== idx));
   const add = () => {
     if (items.some((it) => !it.name.trim())) return;
-    onChange([{ name: "", days: "" }, ...items]);
+    onChange([{ name: "", days: "", shiftsPerDay: "" }, ...items]);
   };
+
+  const plannedShifts = (it) =>
+    (Math.max(0, Number(it.days) || 0)) * (Math.max(0, Number(it.shiftsPerDay) || 0));
 
   return (
     <div className="space-y-2">
       <div className="flex justify-between items-center">
         <p className="text-[11px] text-text-muted">
-          Default days auto-fill the proposal scope &amp; schedule when picked.
+          <span className="font-semibold">Days</span> set the timeline &amp;
+          possession;{" "}
+          <span className="font-semibold">shifts/day</span> give Total Planned
+          Shifts (days × shifts/day) for allocation &amp; progress.
         </p>
         <button
           type="button"
@@ -56,6 +64,22 @@ const RoomDaysList = ({ items, onChange }) => {
           <Plus size={12} /> Add
         </button>
       </div>
+      {/* Column captions for the numeric fields */}
+      {items.length > 0 && (
+        <div className="flex items-center gap-2 px-1">
+          <span className="w-full" />
+          <span className="w-[52px] shrink-0 text-center text-[9.5px] font-semibold uppercase tracking-wider text-text-subtle">
+            Days
+          </span>
+          <span className="w-[52px] shrink-0 text-center text-[9.5px] font-semibold uppercase tracking-wider text-text-subtle">
+            Shifts/day
+          </span>
+          <span className="w-[64px] shrink-0 text-center text-[9.5px] font-semibold uppercase tracking-wider text-text-subtle">
+            Planned
+          </span>
+          <span className="w-6 shrink-0" />
+        </div>
+      )}
       {items.map((item, idx) => (
         <div key={idx} className="flex items-center gap-2 group">
           <input
@@ -65,18 +89,33 @@ const RoomDaysList = ({ items, onChange }) => {
             placeholder="e.g. Living Room"
             className="bg-bg-soft border border-transparent text-[11.5px] text-textcolor rounded-lg px-2.5 py-1.5 w-full focus:outline-none focus:bg-white focus:border-select-blue/40 placeholder:text-text-subtle"
           />
-          <div className="flex items-center gap-1 bg-bg-soft rounded-lg px-2 py-1 shrink-0">
+          <div className="flex items-center gap-1 bg-bg-soft rounded-lg px-2 py-1 shrink-0 w-[52px] justify-center">
             <input
               type="number"
               min={0}
               value={item.days}
               onChange={(e) => update(idx, "days", e.target.value)}
               placeholder="0"
-              className="w-12 bg-white border border-bordergray rounded-md px-1.5 py-1 text-[11.5px] text-textcolor text-center focus:outline-none focus:border-select-blue/40"
+              title="Default duration in days — seeds the proposal & timeline"
+              className="w-9 bg-white border border-bordergray rounded-md px-1 py-1 text-[11.5px] text-textcolor text-center focus:outline-none focus:border-select-blue/40"
             />
-            <span className="text-[10px] font-semibold text-text-subtle">
-              d
-            </span>
+          </div>
+          <div className="flex items-center gap-1 bg-bg-soft rounded-lg px-2 py-1 shrink-0 w-[52px] justify-center">
+            <input
+              type="number"
+              min={0}
+              value={item.shiftsPerDay}
+              onChange={(e) => update(idx, "shiftsPerDay", e.target.value)}
+              placeholder="0"
+              title="Shifts worked per day — Total Planned Shifts = days × shifts/day"
+              className="w-9 bg-white border border-bordergray rounded-md px-1 py-1 text-[11.5px] text-textcolor text-center focus:outline-none focus:border-select-blue/40"
+            />
+          </div>
+          <div
+            className="shrink-0 w-[64px] text-center text-[11.5px] font-semibold text-select-blue tabular-nums"
+            title="Total Planned Shifts = days × shifts/day"
+          >
+            {plannedShifts(item) || "—"}
           </div>
           <button
             type="button"
@@ -200,6 +239,8 @@ const ScheduleConfig = () => {
         .map((r) => ({
           name: r.name.trim(),
           days: r.days === "" ? "" : Math.max(0, Number(r.days) || 0),
+          shiftsPerDay:
+            r.shiftsPerDay === "" ? "" : Math.max(0, Number(r.shiftsPerDay) || 0),
         }))
         .filter((r) => r.name),
 
@@ -231,8 +272,8 @@ const ScheduleConfig = () => {
                 </span>
               </div>
               <p className="text-[12px] text-text-muted mt-0.5">
-                Escalation tiers, rooms, and statuses used by every project
-                schedule
+                Escalation tiers, scope durations &amp; shift requirements used
+                by every project schedule
               </p>
             </div>
           </div>
@@ -341,7 +382,7 @@ const ScheduleConfig = () => {
         <div className="grid grid-cols-1 gap-5 items-start">
           {/* Rooms */}
           <Card
-            title="Room / category presets"
+            title="Scope presets — days & shifts/day"
             icon={<Home size={13} className="text-select-blue" />}
             badge={config.rooms.filter((r) => r.name.trim()).length}
           >

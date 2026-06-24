@@ -1,18 +1,18 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { ChevronDown, Plus, Lock, Folder, Home } from "lucide-react";
 import {
-  getScheduleHeadings,
-  getCategoryFromHeading,
-  getRoomCategoryPresets,
-} from "../data/scheduleConfig";
+  getProposalRoomHeadings,
+  getCategoryFromProposalHeading,
+  getProposalRoomPresets,
+} from "../data/proposalRooms";
 
 /**
  * Editable searchable dropdown for selecting/extending headings.
  *
  * Features:
- * - Primary categories come from Schedule Master → Room / Category Presets
+ * - Primary categories come from the Proposal Master rooms list
  *   (single source of truth — no hardcoded values).
- * - Sub-headings come from Schedule Master headings filtered by category.
+ * - Sub-headings come from the rooms list filtered by category.
  * - User can select a category or sub-heading.
  * - User can extend a heading name (e.g. "Kitchen - Island Area").
  * - The category prefix is locked/read-only — only the suffix is editable.
@@ -40,14 +40,14 @@ const EditableHeadingDropdown = ({
   const dropdownRef = useRef(null);
   const customInputRef = useRef(null);
 
-  // Get all room/category presets from Schedule Master (single source of truth)
-  const roomCategories = useMemo(() => getRoomCategoryPresets(), []);
+  // Get all room/category presets from the Proposal rooms list (single source)
+  const roomCategories = useMemo(() => getProposalRoomPresets(), []);
 
-  // Get all headings from Schedule Master, filtered by the resolved category
+  // Get all headings from the rooms list, filtered by the resolved category
   const resolvedCategory = selectedCategory || category;
   const allHeadings = useMemo(() => {
-    if (!resolvedCategory) return getScheduleHeadings();
-    return getScheduleHeadings(resolvedCategory);
+    if (!resolvedCategory) return getProposalRoomHeadings();
+    return getProposalRoomHeadings(resolvedCategory);
   }, [resolvedCategory]);
 
   // Also include headings from existing scope items that match the category
@@ -58,7 +58,7 @@ const EditableHeadingDropdown = ({
     (existingScopeItems || []).forEach((item) => {
       const heading = (item.area || item.heading || "").trim().toUpperCase();
       if (heading) {
-        const headingCat = getCategoryFromHeading(heading).toUpperCase();
+        const headingCat = getCategoryFromProposalHeading(heading).toUpperCase();
         if (headingCat === catUpper || heading.startsWith(catUpper)) {
           scopeHeadings.add(heading);
         }

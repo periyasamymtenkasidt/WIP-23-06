@@ -16,12 +16,13 @@ import { yupResolver } from "@hookform/resolvers/yup";
 import * as yup from "yup";
 import InputField from "./InputField";
 import CategorySelect from "./CategorySelect";
+import { getRoomDefaultDays } from "../data/scheduleConfig";
 import {
-  getRoomDefaultDays,
-  getScheduleHeadings,
-  getCategoryFromHeading,
-  addScheduleHeading,
-} from "../data/scheduleConfig";
+  getProposalRoomHeadings,
+  getCategoryFromProposalHeading,
+  addProposalRoomHeading,
+  getProposalRoomPresets,
+} from "../data/proposalRooms";
 import {
   assignCategoryNames,
   getDetailedDescription,
@@ -32,6 +33,7 @@ import EditableHeadingDropdown from "./EditableHeadingDropdown";
 import FilteredItemNameDropdown from "./FilteredItemNameDropdown";
 import DuplicateScopeWarningModal from "./DuplicateScopeWarningModal";
 import SearchableSelect from "./SearchableSelect";
+import RateBuildupModal from "../pages/master/itemMaster/RateBuildupModal";
 
 const itemFormSchema = yup.object().shape({
   heading: yup.string().trim(),
@@ -94,6 +96,10 @@ const ItemFormModal = ({
   multiEntryMode = false,
   existingScopeItems = [],
   lockHeading = false,
+  // Item Master: rate & materials are mapped from the Rate Build-up. When true,
+  // they're shown read-only and edited only via the Rate Build-up modal, whose
+  // saved values are auto-mapped back into the form.
+  rateBuildupMode = false,
 }) => {
   const defaults = {
     ...blankLibraryItem(),
@@ -188,17 +194,17 @@ const ItemFormModal = ({
       ];
       
       const resolvedCategory = category || getCategoryFromItemName(itemName);
-      // Use Schedule Master heading to get the root category
-      const rootCategory = getCategoryFromHeading(resolvedCategory);
+      // Resolve the parent room/category from the rooms list
+      const rootCategory = getCategoryFromProposalHeading(resolvedCategory);
 
-      // Get headings from Schedule Master filtered by category
-      const scheduleHeadingNames = getScheduleHeadings(rootCategory).map((h) => h.name.toUpperCase());
+      // Get headings from the rooms list filtered by category
+      const scheduleHeadingNames = getProposalRoomHeadings(rootCategory).map((h) => h.name.toUpperCase());
 
       // Also include headings from existing scope items that match the category
       const scopeHeadings = Array.from(
         new Set(allItems.map((item) => (item.area || item.heading || "Unassigned").trim().toUpperCase()))
       ).filter(h => {
-        const hCat = getCategoryFromHeading(h).toUpperCase();
+        const hCat = getCategoryFromProposalHeading(h).toUpperCase();
         return hCat === rootCategory.toUpperCase();
       });
 
@@ -230,8 +236,8 @@ const ItemFormModal = ({
         },
         onCreateNew: (newHeading) => {
           setDestPrompt((prev) => ({ ...prev, isOpen: false }));
-          // Persist new heading to Schedule Master
-          addScheduleHeading(newHeading, rootCategory);
+          // Persist new heading (rooms list)
+          addProposalRoomHeading(newHeading, rootCategory);
           resolve(newHeading);
         },
         onCancel: () => {
@@ -244,8 +250,22 @@ const ItemFormModal = ({
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [materialPickerOpen, setMaterialPickerOpen] = useState(false);
+  const [buildupOpen, setBuildupOpen] = useState(false);
 
   const update = (changes) => setForm((p) => ({ ...p, ...changes }));
+
+  // Map the Rate Build-up result back into the form: rate (RHF-managed),
+  // materials, and the recipe/grade so it round-trips on the next open. The
+  // form's Save then persists these to the Item Master.
+  const handleBuildupSave = (updated) => {
+    rhfSetValue("rate", Number(updated.rate) || 0, { shouldValidate: true });
+    update({
+      materials: (updated.materials || []).map((m) => ({ ...m })),
+      recipes: updated.recipes,
+      defaultGrade: updated.defaultGrade,
+    });
+    setBuildupOpen(false);
+  };
   const addMaterial = () =>
     update({ materials: [...form.materials, { name: "", spec: "", rate: "" }] });
   const handlePickMaterials = (selectedMaterials) => {
@@ -282,7 +302,7 @@ const ItemFormModal = ({
   // Resolve the category from the current heading for filtering dropdowns
   const resolvedHeadingCategory = useMemo(() => {
     if (!watchedHeading) return "";
-    return getCategoryFromHeading(watchedHeading);
+    return getCategoryFromProposalHeading(watchedHeading);
   }, [watchedHeading]);
 
   // Auto-populate fields when an item is selected from the FilteredItemNameDropdown
@@ -376,7 +396,7 @@ const ItemFormModal = ({
         // Group selected items by category
         const categoryGroups = new Map();
         for (const lib of libOrLibs) {
-          const cat = getCategoryFromHeading(lib.category || "") || lib.category || "Uncategorized";
+          const cat = getCategoryFromProposalHeading(lib.category || "") || lib.category || "Uncategorized";
           if (!categoryGroups.has(cat)) {
             categoryGroups.set(cat, []);
           }
@@ -531,7 +551,7 @@ const ItemFormModal = ({
     });
   };
 
-  const validateCustom = (data, excludeDraftIndex = null) => {
+  const validateCustom = (data) => {
     if (roomCategoryMode) {
       if (!data.heading?.trim()) {
         setError("heading", { type: "manual", message: "Heading is required" });
@@ -539,38 +559,6 @@ const ItemFormModal = ({
       }
       if (!data.itemName?.trim()) {
         setError("itemName", { type: "manual", message: "Item Name is required" });
-        return false;
-      }
-
-      // Check for duplicate itemName under heading
-      const currentHeading = data.heading.trim().toUpperCase();
-      const currentItemName = data.itemName.trim().toLowerCase();
-
-      // Check against existing scope items
-      const isDuplicateInScope = (existingScopeItems || []).some((item) => {
-        if (initial && initial.id && item.id === initial.id) return false;
-        return (
-          (item.area || item.heading || "").trim().toUpperCase() === currentHeading &&
-          (item.itemName || "").trim().toLowerCase() === currentItemName
-        );
-      });
-
-      if (isDuplicateInScope) {
-        setError("heading", { type: "manual", message: "This item already exists under this heading" });
-        return false;
-      }
-
-      // Check against other drafts
-      const isDuplicateInDrafts = drafts.some((draft, index) => {
-        if (excludeDraftIndex !== null && index === excludeDraftIndex) return false;
-        return (
-          (draft.heading || draft.area || "").trim().toUpperCase() === currentHeading &&
-          (draft.itemName || "").trim().toLowerCase() === currentItemName
-        );
-      });
-
-      if (isDuplicateInDrafts) {
-        setError("heading", { type: "manual", message: "This item already exists in your drafts under this heading" });
         return false;
       }
     } else {
@@ -582,8 +570,38 @@ const ItemFormModal = ({
     return true;
   };
 
-  const handleSaveDraft = (validatedData) => {
-    if (!validateCustom(validatedData, selectedDraftIndex)) return;
+  // Detect the same item already present under the same heading — in the saved
+  // scope or in another draft. Returns the heading it was found under (for the
+  // confirmation prompt) or null. Duplicates are no longer blocked: this only
+  // surfaces a warning so the user can confirm before adding the duplicate.
+  const findDuplicateHeading = (data, excludeDraftIndex = null) => {
+    if (!roomCategoryMode) return null;
+    const currentHeading = (data.heading || "").trim().toUpperCase();
+    const currentItemName = (data.itemName || "").trim().toLowerCase();
+    if (!currentHeading || !currentItemName) return null;
+
+    const inScope = (existingScopeItems || []).some((item) => {
+      if (initial && initial.id && item.id === initial.id) return false;
+      return (
+        (item.area || item.heading || "").trim().toUpperCase() === currentHeading &&
+        (item.itemName || "").trim().toLowerCase() === currentItemName
+      );
+    });
+    if (inScope) return currentHeading;
+
+    const inDrafts = drafts.some((draft, index) => {
+      if (excludeDraftIndex !== null && index === excludeDraftIndex) return false;
+      return (
+        (draft.heading || draft.area || "").trim().toUpperCase() === currentHeading &&
+        (draft.itemName || "").trim().toLowerCase() === currentItemName
+      );
+    });
+    if (inDrafts) return currentHeading;
+
+    return null;
+  };
+
+  const performSaveDraft = (validatedData) => {
     const defaultSpec = getDetailedDescription(roomCategoryMode ? validatedData.itemName : validatedData.description);
     const isDescriptionCustom = roomCategoryMode ? (validatedData.spec !== defaultSpec) : false;
     const draftData = {
@@ -631,6 +649,25 @@ const ItemFormModal = ({
     }
   };
 
+  const handleSaveDraft = (validatedData) => {
+    if (!validateCustom(validatedData)) return;
+    const dupHeading = findDuplicateHeading(validatedData, selectedDraftIndex);
+    if (dupHeading) {
+      setDuplicateWarning({
+        isOpen: true,
+        itemName: validatedData.itemName,
+        existingHeading: dupHeading,
+        onAdd: () => {
+          setDuplicateWarning((p) => ({ ...p, isOpen: false }));
+          performSaveDraft(validatedData);
+        },
+        onSkip: () => setDuplicateWarning((p) => ({ ...p, isOpen: false })),
+      });
+      return;
+    }
+    performSaveDraft(validatedData);
+  };
+
   const handleDeleteDraft = () => {
     if (selectedDraftIndex !== null) {
       const indexToDelete = selectedDraftIndex;
@@ -649,8 +686,7 @@ const ItemFormModal = ({
     onSave(drafts);
   };
 
-  const handleFormSubmit = (validatedData) => {
-    if (!validateCustom(validatedData)) return;
+  const performFormSubmit = (validatedData) => {
     const defaultSpec = getDetailedDescription(roomCategoryMode ? validatedData.itemName : validatedData.description);
     const isDescriptionCustom = roomCategoryMode ? (validatedData.spec !== defaultSpec) : false;
     const submittedHeading = lockHeading
@@ -678,6 +714,25 @@ const ItemFormModal = ({
         qty: Number(validatedData.qty) || 0,
       }),
     });
+  };
+
+  const handleFormSubmit = (validatedData) => {
+    if (!validateCustom(validatedData)) return;
+    const dupHeading = findDuplicateHeading(validatedData);
+    if (dupHeading) {
+      setDuplicateWarning({
+        isOpen: true,
+        itemName: validatedData.itemName,
+        existingHeading: dupHeading,
+        onAdd: () => {
+          setDuplicateWarning((p) => ({ ...p, isOpen: false }));
+          performFormSubmit(validatedData);
+        },
+        onSkip: () => setDuplicateWarning((p) => ({ ...p, isOpen: false })),
+      });
+      return;
+    }
+    performFormSubmit(validatedData);
   };
 
   const isEditing = !!initial?.id;
@@ -716,6 +771,7 @@ const ItemFormModal = ({
     submitLabel || (isEditing ? "Save Changes" : "Add Item");
 
   return (
+    <>
     <div
       className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
       onClick={onClose}
@@ -1017,11 +1073,40 @@ const ItemFormModal = ({
               </div>
             ) : (
               <div>
-                <Label className="mb-1.5 flex items-center gap-1">
-                  <Ruler size={11} /> Rate{showAreaFactor ? " & Estimating Factor" : ""}
-                </Label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <Label className="mb-0 flex items-center gap-1">
+                    <Ruler size={11} /> Rate{showAreaFactor ? " & Estimating Factor" : ""}
+                  </Label>
+                  {rateBuildupMode && (
+                    <button
+                      type="button"
+                      onClick={() => setBuildupOpen(true)}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-select-blue/30 bg-active-bg/40 text-select-blue text-[11px] font-semibold hover:bg-active-bg transition-all cursor-pointer"
+                      title="Open the rate build-up to edit materials, labour & margin"
+                    >
+                      <Calculator size={12} /> Edit Rate Build-up
+                    </button>
+                  )}
+                </div>
                 <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
-                  <NumField label={`Rate (₹/${unitLabel})`} value={watchedFields.rate} onChange={(v) => rhfSetValue("rate", v, { shouldValidate: true })} tabular prefix="₹" error={errors.rate?.message} />
+                  {rateBuildupMode ? (
+                    <div className="sm:col-span-2">
+                      <Label className="mb-1">{`Rate (₹/${unitLabel})`}</Label>
+                      <div
+                        className={`${inputBase} bg-bg-soft text-textcolor font-bold tabular-nums flex items-center gap-2 cursor-default select-none`}
+                        title="Computed from the rate build-up"
+                      >
+                        ₹{(Number(watchedFields.rate) || 0).toLocaleString("en-IN")}
+                        {form.defaultGrade && (
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-select-blue bg-active-bg px-1.5 py-0.5 rounded">
+                            {form.defaultGrade}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <NumField label={`Rate (₹/${unitLabel})`} value={watchedFields.rate} onChange={(v) => rhfSetValue("rate", v, { shouldValidate: true })} tabular prefix="₹" error={errors.rate?.message} />
+                  )}
                   {showAreaFactor && (
                     <NumField
                       label="Area factor (× area)"
@@ -1030,6 +1115,12 @@ const ItemFormModal = ({
                     />
                   )}
                 </div>
+                {rateBuildupMode && (
+                  <p className="mt-1 text-[9.5px] text-text-subtle">
+                    Rate is mapped from the Rate Build-up (materials + labour +
+                    overhead + margin). Use “Edit Rate Build-up” to change it.
+                  </p>
+                )}
                 {showAreaFactor && (
                   <p className="mt-1 text-[9.5px] text-text-subtle">
                     Assumed qty on a quote = package carpet area × this factor (e.g.
@@ -1083,68 +1174,109 @@ const ItemFormModal = ({
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <Label className="mb-0">Materials & Specifications</Label>
-                <div className="flex items-center gap-2">
+                {rateBuildupMode ? (
                   <button
                     type="button"
-                    onClick={() => setMaterialPickerOpen(true)}
+                    onClick={() => setBuildupOpen(true)}
                     className="flex items-center gap-1 text-[11px] font-semibold text-select-blue hover:text-primary cursor-pointer"
+                    title="Materials are mapped from the rate build-up"
                   >
-                    <Package size={11} /> Pick from Master
+                    <Calculator size={11} /> Edit Rate Build-up
                   </button>
-                  <span className="text-bordergray">|</span>
-                  <button
-                    type="button"
-                    onClick={addMaterial}
-                    className="flex items-center gap-1 text-[11px] font-semibold text-select-blue hover:text-primary cursor-pointer"
-                  >
-                    <Plus size={11} /> Add Material
-                  </button>
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                {form.materials.length === 0 && (
-                  <p className="text-[10.5px] text-text-subtle border border-dashed border-bordergray rounded-lg py-3 text-center">
-                    No materials yet — add brand & spec to lock in quality
-                  </p>
-                )}
-                 {form.materials.map((m, idx) => (
-                  <div key={idx} className="grid grid-cols-[130px_1fr_75px_28px] gap-2 items-center">
-                    <textarea
-                      value={m.name}
-                      onChange={(e) => updateMaterial(idx, "name", e.target.value)}
-                      placeholder="Plywood"
-                      className={`${inputBase} font-medium text-[11.5px] py-1.5 resize-none`}
-                      rows={1}
-                    />
-                    <textarea
-                      value={m.spec}
-                      onChange={(e) => updateMaterial(idx, "spec", e.target.value)}
-                      placeholder="BWP 19mm Greenply"
-                      className={`${inputBase} text-[11.5px] py-1.5 resize-none`}
-                      rows={1}
-                    />
-                    <div className="relative">
-                      <input
-                        type="number"
-                        value={m.rate || ""}
-                        onChange={(e) => updateMaterial(idx, "rate", e.target.value)}
-                        placeholder="Rate"
-                        className={`${inputBase} text-[11.5px] py-1.5 pl-4 text-right`}
-                      />
-                      <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[10px] text-text-subtle font-medium">
-                        ₹
-                      </span>
-                    </div>
+                ) : (
+                  <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => removeMaterial(idx)}
-                      className="h-7 w-7 flex items-center justify-center rounded-md text-text-subtle hover:text-red-500 hover:bg-red-50 cursor-pointer"
+                      onClick={() => setMaterialPickerOpen(true)}
+                      className="flex items-center gap-1 text-[11px] font-semibold text-select-blue hover:text-primary cursor-pointer"
                     >
-                      <Trash2 size={11} />
+                      <Package size={11} /> Pick from Master
+                    </button>
+                    <span className="text-bordergray">|</span>
+                    <button
+                      type="button"
+                      onClick={addMaterial}
+                      className="flex items-center gap-1 text-[11px] font-semibold text-select-blue hover:text-primary cursor-pointer"
+                    >
+                      <Plus size={11} /> Add Material
                     </button>
                   </div>
-                ))}
+                )}
               </div>
+              {rateBuildupMode ? (
+                <div className="space-y-1.5">
+                  {form.materials.length === 0 ? (
+                    <p className="text-[10.5px] text-text-subtle border border-dashed border-bordergray rounded-lg py-3 text-center">
+                      No materials yet — add them in the rate build-up.
+                    </p>
+                  ) : (
+                    form.materials.map((m, idx) => (
+                      <div
+                        key={idx}
+                        className="grid grid-cols-[130px_1fr_75px] gap-2 items-center bg-bg-soft border border-bordergray rounded-lg px-2.5 py-1.5"
+                      >
+                        <span className="text-[11.5px] font-medium text-textcolor truncate" title={m.name}>
+                          {m.name || "—"}
+                        </span>
+                        <span className="text-[11.5px] text-text-muted truncate" title={m.spec}>
+                          {m.spec || "—"}
+                        </span>
+                        <span className="text-[11.5px] text-textcolor tabular-nums text-right">
+                          {m.rate !== "" && m.rate != null ? `₹${Number(m.rate).toLocaleString("en-IN")}` : "—"}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                  <p className="text-[9.5px] text-text-subtle">
+                    Materials are mapped from the Rate Build-up and are read-only here.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {form.materials.length === 0 && (
+                    <p className="text-[10.5px] text-text-subtle border border-dashed border-bordergray rounded-lg py-3 text-center">
+                      No materials yet — add brand & spec to lock in quality
+                    </p>
+                  )}
+                   {form.materials.map((m, idx) => (
+                    <div key={idx} className="grid grid-cols-[130px_1fr_75px_28px] gap-2 items-center">
+                      <textarea
+                        value={m.name}
+                        onChange={(e) => updateMaterial(idx, "name", e.target.value)}
+                        placeholder="Plywood"
+                        className={`${inputBase} font-medium text-[11.5px] py-1.5 resize-none`}
+                        rows={1}
+                      />
+                      <textarea
+                        value={m.spec}
+                        onChange={(e) => updateMaterial(idx, "spec", e.target.value)}
+                        placeholder="BWP 19mm Greenply"
+                        className={`${inputBase} text-[11.5px] py-1.5 resize-none`}
+                        rows={1}
+                      />
+                      <div className="relative">
+                        <input
+                          type="number"
+                          value={m.rate || ""}
+                          onChange={(e) => updateMaterial(idx, "rate", e.target.value)}
+                          placeholder="Rate"
+                          className={`${inputBase} text-[11.5px] py-1.5 pl-4 text-right`}
+                        />
+                        <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[10px] text-text-subtle font-medium">
+                          ₹
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeMaterial(idx)}
+                        className="h-7 w-7 flex items-center justify-center rounded-md text-text-subtle hover:text-red-500 hover:bg-red-50 cursor-pointer"
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {showTags && (
@@ -1260,6 +1392,7 @@ const ItemFormModal = ({
         headingsWithItem={destPrompt.headingsWithItem}
         onSelect={destPrompt.onSelect}
         onCreateNew={destPrompt.onCreateNew}
+        roomPresets={getProposalRoomPresets().map((r) => r.name)}
       />
 
       <DuplicateScopeWarningModal
@@ -1270,6 +1403,21 @@ const ItemFormModal = ({
         onSkip={duplicateWarning.onSkip}
       />
     </div>
+
+    {/* Rate Build-up — the single editor for the item's rate & materials.
+        Rendered outside the form's click-to-close backdrop. */}
+    {rateBuildupMode && buildupOpen && (
+      <RateBuildupModal
+        item={{
+          ...form,
+          description: watch("description") || form.description || watchedItemName || "",
+          rate: Number(watchedRate) || Number(form.rate) || 0,
+        }}
+        onSave={handleBuildupSave}
+        onClose={() => setBuildupOpen(false)}
+      />
+    )}
+    </>
   );
 };
 

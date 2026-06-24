@@ -1645,11 +1645,11 @@ const QuoteModal = ({
 
                             {/* Qty · rate · days meta · per-scope grade */}
                             <div className="flex items-center gap-3 px-0.5 text-[10px] text-text-muted">
-                              <span className="font-semibold">
-                                {Number(item.qty) > 0
-                                  ? `${Number(item.qty).toLocaleString("en-IN")} ${item.unit}`
-                                  : item.unit}
-                              </span>
+                              {Number(item.qty) > 0 && (
+                                <span className="font-semibold">
+                                  {Number(item.qty).toLocaleString("en-IN")}
+                                </span>
+                              )}
                               <span>
                                 ₹{Number(item.rate || 0).toLocaleString("en-IN")}/
                                 {item.unit}

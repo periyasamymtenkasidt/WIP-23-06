@@ -2076,8 +2076,8 @@ const ProposalMaster = () => {
                                       <Trash2 size={13} />
                                     </button>
                                   </div>
-                                  <div className="pl-[60px] space-y-2">
-                                    <div className="grid grid-cols-[1fr_1fr_110px] gap-3 items-end">
+                                  <div className="space-y-2">
+                                    <div className="grid grid-cols-[1.6fr_1.2fr_92px] gap-3 items-end">
                                       {/* UNIT */}
                                       <div>
                                         <label className="block text-[9px] font-semibold uppercase tracking-wider text-text-muted mb-1">

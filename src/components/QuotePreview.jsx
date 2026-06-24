@@ -31,7 +31,6 @@ const QuotePreview = ({ quote }) => {
 
   const { subtotal, gst, grandTotal } = computeTotals(refreshedScopeItems);
   const namedItems = assignCategoryNames(refreshedScopeItems);
-  const isSample = !!quote.isSampleQuote;
 
   // Group named items by base category (item.area)
   const groupedPreviewItems = useMemo(() => {
@@ -155,9 +154,8 @@ const QuotePreview = ({ quote }) => {
             <th className="py-3 px-2 text-left w-8">#</th>
             <th className="py-3 px-2 text-left">OBJECTS</th>
             <th className="py-3 px-2 text-left">DESCRIPTION</th>
-            <th className="py-3 px-2 text-center">UNITS</th>
-            <th className="py-3 px-2 text-center">QTY</th>
             <th className="py-3 px-2 text-center">RATE/SQ.FT.</th>
+            <th className="py-3 px-2 text-center">QTY</th>
             <th className="py-3 px-2 text-right">AMOUNT (INR)</th>
           </tr>
         </thead>
@@ -170,7 +168,7 @@ const QuotePreview = ({ quote }) => {
                   {/* Base category section header */}
                   <tr className="bg-slate-50/50">
                     <td
-                      colSpan={7}
+                      colSpan={6}
                       className="py-2 px-2 font-bold uppercase tracking-wider text-[9px] text-gray-800 bg-paleorange/10 border-b border-black/10"
                     >
                       {group.baseCat}
@@ -215,14 +213,11 @@ const QuotePreview = ({ quote }) => {
                             </ul>
                           )}
                         </td>
-                        <td className="py-4 px-2 text-center italic">
-                          {item.unit || "sqft"}
+                        <td className="py-4 px-2 text-center whitespace-nowrap">
+                          {formatAmount(rate)}/{item.unit || "sqft"}
                         </td>
                         <td className="py-4 px-2 text-center whitespace-nowrap">
                           {qty.toFixed(1)} {item.unit || "sqft"}
-                        </td>
-                        <td className="py-4 px-2 text-center">
-                          {formatAmount(rate)}
                         </td>
                         <td className="py-4 px-2 text-right font-bold">
                           {formatAmount(amount)}
@@ -236,7 +231,7 @@ const QuotePreview = ({ quote }) => {
           ) : (
             <tr className="border-b border-black">
               <td
-                colSpan={7}
+                colSpan={6}
                 className="py-10 text-center text-gray-300 italic uppercase tracking-widest"
               >
                 No Items Added

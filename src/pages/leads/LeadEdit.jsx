@@ -8,7 +8,6 @@ import ConvertToClientForm from "./ConvertToClientForm";
 import NegotiationModal from "../projects/NegotiationModal";
 import LogActivityModal from "../projects/LogActivityModal";
 import QuoteModal from "../../components/QuoteModal";
-import SampleQuoteModal from "../../components/SampleQuoteModal";
 import FeeProposalModal from "../../components/FeeProposalModal";
 import PrelimVisitModal from "../../components/PrelimVisitModal";
 import QuotePreviewModal from "../../components/QuotePreviewModal";
@@ -394,7 +393,6 @@ const LeadEdit = () => {
   const [showLogModal, setShowLogModal] = useState(false);
   const [logTab, setLogTab] = useState("call");
   const [showProposalModal, setShowProposalModal] = useState(false);
-  const [showSampleQuote, setShowSampleQuote] = useState(false);
   const [showPrelimVisit, setShowPrelimVisit] = useState(false);
   const [previewDoc, setPreviewDoc] = useState(null);
   const [activity, setActivity] = useState(() => (id ? getActivity(id) : []));
@@ -650,8 +648,6 @@ const LeadEdit = () => {
   const hasProposalBeenSent =
     documents.length > 0 ||
     ["proposal", "negotiation", "won"].includes(lead?.status?.toLowerCase());
-  const showSampleQuoteButton =
-    ["inquiry", "qualified"].includes(lead?.status?.toLowerCase());
 
   return (
     <div className="bg-overallbg p-6 font-sans h-full flex flex-col overflow-y-auto lg:overflow-hidden scroll-hidden-bar">
@@ -884,15 +880,6 @@ const LeadEdit = () => {
                 </div>
               </div>
               <div className="flex gap-3">
-                {showSampleQuoteButton && !isArchLead && (
-                  <button
-                    type="button"
-                    onClick={() => setShowSampleQuote(true)}
-                    className="px-6 py-2.5 bg-dark-blue text-white rounded-xl text-[13px] font-semibold shadow-md shadow-dark-blue/20 hover:bg-blue-950 transition-colors cursor-pointer"
-                  >
-                    Sample Quote
-                  </button>
-                )}
                 <button
                   type="button"
                   onClick={() => {
@@ -1366,7 +1353,7 @@ const LeadEdit = () => {
               transitionStatus(next);
             }
             // Keep the inquiry snapshot aligned with the grade/rates actually
-            // sent so Sample Quote and subsequent proposal opens use it.
+            // sent so subsequent proposal opens use it.
             const quotePatch = {
               quoteGrade: quote?.grade || "premium",
               quoteScopeItems: quote?.scopeItems || lead.quoteScopeItems,
@@ -1419,82 +1406,6 @@ const LeadEdit = () => {
           quote={previewDoc.snapshot}
           fileName={previewDoc.fileName}
           onClose={() => setPreviewDoc(null)}
-        />
-      )}
-
-      {/* Sample Quote — independent from Proposal Form */}
-      {showSampleQuote && showSampleQuoteButton && (
-        <SampleQuoteModal
-          recipient={{
-            name: lead.clientName,
-            email: lead.email,
-            phone: lead.phone,
-            projectName: lead.location || "Project",
-          }}
-          defaultPropertyType={lead.propertyType || lead.location}
-          presetData={{
-            presetKey: lead.quotePreset,
-            grade: lead.quoteGrade,
-            propertyType: lead.propertyType || lead.location,
-            sizeRange: lead.quoteSizeRange,
-            notes: lead.quoteNotes,
-            scopeItems: lead.quoteScopeItems,
-            inclusions: lead.quoteInclusions,
-            exclusions: lead.quoteExclusions,
-            categoryInclusions: lead.quoteCategoryInclusions,
-            categoryExclusions: lead.quoteCategoryExclusions,
-            addedInclusions: lead.quoteAddedInclusions,
-            addedExclusions: lead.quoteAddedExclusions,
-          }}
-          onClose={() => setShowSampleQuote(false)}
-          onSave={(updates) => {
-            const updatedLead = {
-              ...lead,
-              quotePreset: updates.quotePreset,
-              quoteGrade: updates.quoteGrade,
-              quoteSizeRange: updates.quoteSizeRange,
-              quoteScopeItems: updates.quoteScopeItems,
-              quoteInclusions: updates.quoteInclusions,
-              quoteExclusions: updates.quoteExclusions,
-              quoteCategoryInclusions: updates.quoteCategoryInclusions,
-              quoteCategoryExclusions: updates.quoteCategoryExclusions,
-              quoteAddedInclusions: updates.quoteAddedInclusions,
-              quoteAddedExclusions: updates.quoteAddedExclusions,
-              quoteNotes: updates.quoteNotes,
-            };
-            const saved = localStorage.getItem("newLeadsData");
-            const newLeads = saved ? JSON.parse(saved) : [];
-            const filtered = newLeads.filter((l) => l.proposalId !== lead.proposalId);
-            localStorage.setItem(
-              "newLeadsData",
-              JSON.stringify([updatedLead, ...filtered]),
-            );
-            setLead(updatedLead);
-            window.dispatchEvent(new Event("leadDataChanged"));
-          }}
-          onSentEmail={({ to, subject, body, total, quoteId, quote }) => {
-            // Persist the quote snapshot into the Documents section —
-            // identical to how the Proposal Form saves on send.
-            if (quote) {
-              saveQuoteDocument(lead.proposalId, {
-                ...quote,
-                recipientName: lead.clientName,
-                recipientEmail: to,
-              });
-            }
-            setActivity(
-              appendActivity(lead.proposalId, {
-                type: "email",
-                to,
-                subject,
-                body,
-                quoteId,
-                total,
-                attachments: [{ name: "Quotation.pdf", size: 154000 }]
-              }),
-            );
-            window.dispatchEvent(new Event("leadDataChanged"));
-          }}
         />
       )}
 

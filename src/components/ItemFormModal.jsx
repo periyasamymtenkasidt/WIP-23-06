@@ -197,15 +197,33 @@ const ItemFormModal = ({
       // Resolve the parent room/category from the rooms list
       const rootCategory = getCategoryFromProposalHeading(resolvedCategory);
 
-      // Get headings from the rooms list filtered by category
-      const scheduleHeadingNames = getProposalRoomHeadings(rootCategory).map((h) => h.name.toUpperCase());
+      // Is the resolved category an actual room in the Proposal rooms list?
+      // An unknown / "Uncategorized" category is NOT a real heading — treating
+      // it as one is exactly what silently dumped scopes under "Uncategorized".
+      // getProposalRoomHeadings() echoes an unknown category back as its own
+      // single heading, so we must guard against that here.
+      const BOGUS = new Set(["", "UNCATEGORIZED", "UNASSIGNED"]);
+      const roomPresetNames = getProposalRoomPresets().map((r) =>
+        r.name.trim().toUpperCase(),
+      );
+      const isKnownCategory =
+        roomPresetNames.includes((rootCategory || "").trim().toUpperCase()) &&
+        !BOGUS.has((rootCategory || "").trim().toUpperCase());
 
-      // Also include headings from existing scope items that match the category
+      // Headings to offer: the matched room when the category is known,
+      // otherwise the full room list so the user can pick a real heading.
+      const scheduleHeadingNames = isKnownCategory
+        ? getProposalRoomHeadings(rootCategory).map((h) => h.name.toUpperCase())
+        : roomPresetNames;
+
+      // Existing scope headings — restrict to the category when known, and
+      // never surface the bogus "Uncategorized"/"Unassigned" buckets.
       const scopeHeadings = Array.from(
-        new Set(allItems.map((item) => (item.area || item.heading || "Unassigned").trim().toUpperCase()))
-      ).filter(h => {
-        const hCat = getCategoryFromProposalHeading(h).toUpperCase();
-        return hCat === rootCategory.toUpperCase();
+        new Set(allItems.map((item) => (item.area || item.heading || "").trim().toUpperCase()))
+      ).filter((h) => {
+        if (BOGUS.has(h)) return false;
+        if (!isKnownCategory) return false;
+        return getCategoryFromProposalHeading(h).toUpperCase() === rootCategory.toUpperCase();
       });
 
       // Combine and deduplicate
@@ -213,11 +231,14 @@ const ItemFormModal = ({
 
       const headingsWithItem = allItems
         .filter((item) => (item.itemName || item.description || "").trim().toLowerCase() === itemName.trim().toLowerCase())
-        .map((item) => (item.area || item.heading || "Unassigned").trim().toUpperCase());
+        .map((item) => (item.area || item.heading || "").trim().toUpperCase());
 
-      // Single Heading Exception - only if there is exactly 1 heading of the matching category
-      if (existingHeadings.length <= 1) {
-        const singleHeading = existingHeadings.length === 1 ? existingHeadings[0] : rootCategory.toUpperCase();
+      // Single Heading Exception — only auto-resolve (skip the prompt) for a
+      // KNOWN category that has exactly one heading. An unknown category always
+      // prompts so the user assigns the whole group to a real heading instead
+      // of "Uncategorized".
+      if (isKnownCategory && existingHeadings.length === 1) {
+        const singleHeading = existingHeadings[0];
         if (!headingsWithItem.includes(singleHeading)) {
           resolve(singleHeading);
           return;
@@ -227,7 +248,7 @@ const ItemFormModal = ({
       setDestPrompt({
         isOpen: true,
         itemName,
-        category: rootCategory,
+        category: isKnownCategory ? rootCategory : "",
         existingHeadings,
         headingsWithItem,
         onSelect: (selectedHeading) => {

@@ -1700,10 +1700,11 @@ const QuoteModal = ({
                     {groupOpen && (
                       <div className="p-3 space-y-3 bg-white">
                         {group.rows.map(({ item, idx }) => {
-                          // Preset-mapped rows stay locked on a first proposal
-                          // send; rows added via "Pick from Library" remain
-                          // editable so they can be priced/described.
-                          const rowLocked = lockScope && !item._userAdded;
+                          // On a first proposal send the scope is read-only —
+                          // this applies to both preset-mapped rows and rows
+                          // added via "Pick from Library": once added they are
+                          // readable but not editable.
+                          const rowLocked = lockScope;
                           return (
                             <div
                               key={idx}

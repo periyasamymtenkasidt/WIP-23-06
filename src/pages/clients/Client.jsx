@@ -83,7 +83,7 @@ const Client = () => {
       return n > max ? n : max;
     }, 0);
     const nextNum = maxStaticId + newClients.length + 1;
-    const clientID = `BL-2024-${String(nextNum).padStart(3, "0")}`;
+    const clientID = `BL-2026-${String(nextNum).padStart(3, "0")}`;
     const today = new Date();
     const joinDate = `${String(today.getDate()).padStart(2, "0")}.${String(today.getMonth() + 1).padStart(2, "0")}.${today.getFullYear()}`;
     const newClient = {

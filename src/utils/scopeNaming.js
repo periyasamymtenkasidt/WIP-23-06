@@ -155,54 +155,67 @@ export const refreshScopeItemsFromMaster = (scopeItems, presetKey, propertyType)
     const cfg = configs.find((c) => c.propertyType === propertyType) || configs[0];
     if (!cfg || !Array.isArray(cfg.scopeItems)) return scopeItems;
 
-    return scopeItems.map((item) => {
+    const masterItems = cfg.scopeItems;
+
+    const nameOf = (x) => (x.itemName || "").toLowerCase().trim();
+    const areaOf = (x) => (x.area || x.heading || "").toLowerCase().trim();
+
+    // Locate the master scope item that corresponds to a saved scope row, and
+    // report whether the match agrees on category. Only a category-safe match
+    // is allowed to move the row into the master's heading; a name-only match
+    // must not, otherwise an item gets pulled into the wrong category.
+    const findMasterMatch = (item) => {
       let masterItem = null;
+      let categorySafeMatch = false;
+
       if (item.id) {
-        masterItem = cfg.scopeItems.find((m) => m.id === item.id);
+        masterItem = masterItems.find((m) => m.id === item.id);
+        // An id match is authoritative on category.
+        if (masterItem) categorySafeMatch = true;
       }
       if (!masterItem && item.itemName) {
-        // 1. Try to match by both itemName and area/heading first
-        masterItem = cfg.scopeItems.find(
-          (m) =>
-            (m.itemName || "").toLowerCase().trim() === (item.itemName || "").toLowerCase().trim() &&
-            (m.area || m.heading || "").toLowerCase().trim() === (item.area || item.heading || "").toLowerCase().trim()
+        // 1. Match by both itemName and area/heading.
+        masterItem = masterItems.find(
+          (m) => nameOf(m) === nameOf(item) && areaOf(m) === areaOf(item)
         );
+        if (masterItem) categorySafeMatch = true;
 
-        // 2. Try to match by itemName and category key
+        // 2. Match by itemName and category key.
         if (!masterItem) {
           const itemCatKey = getCategoryKey(item.area || item.heading);
-          masterItem = cfg.scopeItems.find(
+          masterItem = masterItems.find(
             (m) =>
-              (m.itemName || "").toLowerCase().trim() === (item.itemName || "").toLowerCase().trim() &&
+              nameOf(m) === nameOf(item) &&
               getCategoryKey(m.area || m.heading) === itemCatKey
           );
+          if (masterItem) categorySafeMatch = true;
         }
 
-        // 3. Fallback to matching only itemName
+        // 3. Fallback to matching only itemName. NOT category-safe: sync the
+        // item's data but never relocate it to the master's heading.
         if (!masterItem) {
-          masterItem = cfg.scopeItems.find(
-            (m) => (m.itemName || "").toLowerCase().trim() === (item.itemName || "").toLowerCase().trim()
-          );
+          masterItem = masterItems.find((m) => nameOf(m) === nameOf(item));
         }
       }
+      return { masterItem, categorySafeMatch };
+    };
 
-      if (!masterItem) return item;
-
+    // Merge a saved scope row with its master counterpart, keeping user edits.
+    const syncFromMaster = (item, masterItem, categorySafeMatch) => {
       const id = item.id || masterItem.id;
 
-      // 1. Heading Name propagation
+      // Heading Name propagation — only when the match agrees on category, so
+      // the scope of work always matches the master's category exactly.
       let area = item.area;
-      if (!item.isAreaCustom) {
+      if (!item.isAreaCustom && categorySafeMatch) {
         area = masterItem.heading || masterItem.area || area;
       }
 
-      // 2. Item Name propagation
       let itemName = item.itemName;
       if (!item.isItemNameCustom) {
         itemName = masterItem.itemName || itemName;
       }
 
-      // 3. Detailed Description propagation
       let description = item.description;
       if (!item.isDescriptionCustom) {
         description = masterItem.description || masterItem.spec || description;
@@ -219,7 +232,40 @@ export const refreshScopeItemsFromMaster = (scopeItems, presetKey, propertyType)
         itemName,
         description,
       };
+    };
+
+    // Reconcile the saved scope against the current master so EVERY master
+    // change is reflected: existing rows are re-synced, rows added to the master
+    // are appended, and rows deleted from the master are dropped. Rows the user
+    // added inside the proposal (or customized) are always kept.
+    const consumed = new Set();
+    const result = [];
+
+    scopeItems.forEach((item) => {
+      const { masterItem, categorySafeMatch } = findMasterMatch(item);
+      if (masterItem) {
+        consumed.add(masterItems.indexOf(masterItem));
+        result.push(syncFromMaster(item, masterItem, categorySafeMatch));
+      } else if (item._userAdded || item.isAreaCustom || item.isItemNameCustom) {
+        // User-added or user-customized rows have no master origin to remove.
+        result.push(item);
+      }
+      // Otherwise the row came from the master and no longer exists there →
+      // drop it, mirroring the deletion.
     });
+
+    // Append rows added to the master after this scope was last saved.
+    masterItems.forEach((m, idx) => {
+      if (consumed.has(idx)) return;
+      result.push(
+        normalizeScopeItem({
+          ...m,
+          materials: m.materials ? m.materials.map((mat) => ({ ...mat })) : [],
+        })
+      );
+    });
+
+    return result;
   } catch (e) {
     console.error("Error refreshing scope items from master:", e);
     return scopeItems;

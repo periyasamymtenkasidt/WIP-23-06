@@ -86,7 +86,7 @@ const FIELD_CONFIG = {
       name: "locationSecondary",
       label: "City / Location",
       type: "text",
-      placeholder: "e.g. Beverly Hills, CA",
+      placeholder: "e.g. Powai, Mumbai",
       icon: GrLocation,
     },
     {

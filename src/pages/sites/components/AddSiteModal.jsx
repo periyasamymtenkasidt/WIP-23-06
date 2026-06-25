@@ -95,7 +95,7 @@ const AddSiteModal = ({ onClose, onSubmit, isSaving, SUPERVISORS = [] }) => {
           label="Client Name"
           value={clientName}
           onChange={(e) => setClientName(e.target.value)}
-          placeholder="e.g. Robert Ben"
+          placeholder="e.g. Aarav Mehta"
           required
         />
 
@@ -131,7 +131,7 @@ const AddSiteModal = ({ onClose, onSubmit, isSaving, SUPERVISORS = [] }) => {
             label="City / Location"
             value={location}
             onChange={(e) => setLocation(e.target.value)}
-            placeholder="e.g. Beverly Hills, CA"
+            placeholder="e.g. Powai, Mumbai"
             required
           />
 

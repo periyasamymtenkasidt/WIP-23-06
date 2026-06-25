@@ -60,7 +60,7 @@ const FIELD_CONFIG = {
   ],
   propertyDetails: [
     { name: "location", label: "Property Type", type: "select", options: propertyTypes },
-    { name: "locationSecondary", label: "City / Location", type: "text", placeholder: "e.g. Beverly Hills, CA", icon: GrLocation },
+    { name: "locationSecondary", label: "City / Location", type: "text", placeholder: "e.g. Powai, Mumbai", icon: GrLocation },
     { name: "budget", label: "Budget", type: "text", placeholder: "e.g. ₹60 – 70L" },
   ],
 };

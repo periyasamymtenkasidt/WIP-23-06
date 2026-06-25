@@ -7,6 +7,11 @@ import { getRoomDefaultDays } from "./scheduleConfig";
 import { cleanSizeRange } from "../utils/sizeRangeValidation";
 import { normalizeScopeItem } from "../utils/scopeNaming";
 import { DEFAULT_LIBRARY } from "./itemLibrary";
+import {
+  parseBaseArea,
+  getNormalizedAllocations,
+  estimateScopeItems,
+} from "./scopeEstimator";
 
 export const GST_RATE = 18;
 
@@ -14,45 +19,204 @@ const COMMON_INCLUSIONS = [];
 
 const COMMON_EXCLUSIONS = [];
 
-// ── Scope of Work, sourced from the Item Master ────────────────────────────
-// Every preset's scope of work is composed from the SAME catalog the BOQ and
-// rate build-up use (DEFAULT_LIBRARY in itemLibrary.js). Each row carries the
-// item's real unit, ₹/unit rate, HSN, lead-time and material specs, and links
-// back to its catalog item by name (itemName === library description) so grade
-// re-mapping and rate build-ups resolve cleanly. The only per-preset input is
-// the room each work sits in and an assumed package quantity.
-const LIB_BY_NAME = DEFAULT_LIBRARY.reduce((map, it) => {
-  map[it.description] = it;
-  return map;
-}, {});
+// ── Seed scope-of-work rows from the Item Master ───────────────────────────
+// Factory presets used to carry one hand-typed, lump-sum row per room (e.g.
+// "False ceiling, accent wall, TV unit, lighting" = ₹80,000 flat). That data
+// had no link back to the Item Master and no real quantity — just a flat ₹
+// figure — so grade switching / rate build-ups / size-range changes couldn't
+// touch it.
+//
+// `scopeRow` instead looks up a real catalog item by its exact `description`
+// and builds a proper line item — masterId, unit, rate and materials all
+// sourced from the Item Master, the same shape a user gets from "Add Scope" →
+// pick from library. Its quantity is NOT hand-typed either. The Smart
+// Estimator divides each room's allocated sqft evenly among its area-based
+// scope rows; `areaFactor` remains available for non-area units.
+// `buildScope` runs the same room-allocation split the live "Auto
+// Calculations" toggle uses (`scopeEstimator.js`) to turn that factor into a
+// real qty/amount from the preset's size range, so every preset ships with
+// Smart Estimator already on.
+const libByName = new Map(DEFAULT_LIBRARY.map((it) => [it.description, it]));
 
-// Build one scope row from an Item Master work: room + assumed package qty.
-// rate, unit, days, HSN and materials come straight from the catalog;
-// amount = qty × rate. The description is a spec line derived from the item's
-// own materials so the quote shows what each work is made of.
-const work = (room, name, qty) => {
-  const lib = LIB_BY_NAME[name];
+const scopeRow = (area, itemDescription, areaFactor = 1) => {
+  const lib = libByName.get(itemDescription);
   if (!lib) {
-    throw new Error(`Proposal Master: unknown Item Master work "${name}"`);
+    throw new Error(`Item Master seed: no catalog item named "${itemDescription}"`);
   }
-  const materials = (lib.materials || []).map((m) => ({ ...m }));
-  const description = materials.length
-    ? materials.map((m) => `${m.name}: ${m.spec}`).join(" · ")
-    : name;
   return {
-    area: room,
-    itemName: name,
-    description,
+    area,
+    heading: area,
+    itemName: lib.description,
+    description: lib.spec || "",
+    masterId: lib.id,
     unit: lib.unit,
-    rate: lib.rate,
-    qty,
-    amount: Math.round(qty * lib.rate),
-    days: lib.days,
-    hsn: lib.hsn,
-    gstPercent: lib.gstPercent,
-    materials,
+    areaFactor,
+    rate: Number(lib.rate) || 0,
+    days: lib.days || 0,
+    materials: (lib.materials || []).map((m) => ({ ...m })),
   };
 };
+
+// `rows` is a list of [itemDescription, areaFactor] tuples for one room.
+const room = (area, rows) => rows.map(([desc, factor]) => scopeRow(area, desc, factor));
+
+// Split `sizeRange`'s sqft across `rawItems`' rooms (default Smart Estimator
+// allocation %) and derive each row's qty/amount from its room's share.
+// Returns the estimator fields (`totalArea`, `roomAllocations`) alongside the
+// computed `scopeItems` so the preset's Smart Estimator panel shows the exact
+// split that produced those quantities, instead of recomputing blind later.
+const seedConfig = (sizeRange, rawItems) => {
+  const totalArea = parseBaseArea(sizeRange) || 1000;
+  const roomAllocations = getNormalizedAllocations(rawItems, {});
+  return {
+    totalArea,
+    roomAllocations,
+    scopeItems: estimateScopeItems(rawItems, totalArea, roomAllocations),
+  };
+};
+
+// Per-room item lists as [itemDescription, areaFactor] tuples. Area-based
+// works share the room sqft evenly; the factor remains useful for count and
+// length units. `buildScope` turns these into real qty/amount once a size
+// range is known.
+const ONE_BHK_RAW = [
+  ...room("Living Room", [
+    ["False Ceiling — gypsum board with cove groove", 0.65],
+    ["TV Unit — paneling with storage", 0.12],
+    ["Accent Wall Paneling — veneer / laminate", 0.15],
+    ["Cove / Profile Lighting", 0.5],
+  ]),
+  ...room("Kitchen", [
+    ["Modular Kitchen Base Unit", 0.35],
+    ["Modular Kitchen Wall Unit", 0.28],
+    ["Kitchen Counter — granite / quartz", 0.35],
+  ]),
+  ...room("Master Bedroom", [
+    ["Wardrobe — laminate, soft-close", 0.18],
+    ["Bed Back Panel — upholstered", 0.1],
+  ]),
+  ...room("Bathrooms", [
+    ["Bathroom Vanity — marine ply + counter", 0.18],
+    ["Shower Glass Partition — 8mm toughened", 0.35],
+    ["Wall Mirror Panel", 0.1],
+  ]),
+];
+
+const TWO_BHK_RAW = [
+  ...room("Living Room", [
+    ["False Ceiling — gypsum board with cove groove", 0.65],
+    ["TV Unit — paneling with storage", 0.12],
+    ["Accent Wall Paneling — veneer / laminate", 0.15],
+    ["Crockery Unit — glass shutters + lighting", 0.15],
+    ["Cove / Profile Lighting", 0.5],
+  ]),
+  ...room("Kitchen", [
+    ["Modular Kitchen Base Unit", 0.35],
+    ["Modular Kitchen Wall Unit", 0.28],
+    ["Kitchen Counter — granite / quartz", 0.35],
+  ]),
+  ...room("Master Bedroom", [
+    ["Wardrobe — laminate, soft-close", 0.18],
+    ["Bed Back Panel — upholstered", 0.1],
+    ["Dresser Unit — with mirror", 0.08],
+  ]),
+  ...room("Bedroom 2", [
+    ["Wardrobe — laminate, soft-close", 0.18],
+    ["Study / Work Desk — built-in", 0.25],
+  ]),
+  ...room("Bathrooms", [
+    ["Bathroom Vanity — marine ply + counter", 0.18],
+    ["Shower Glass Partition — 8mm toughened", 0.35],
+    ["Wall Mirror Panel", 0.1],
+  ]),
+  ...room("Foyer", [
+    ["Shoe Rack — with bench top", 0.2],
+    ["Foyer Console — with mirror", 0.18],
+  ]),
+];
+
+const THREE_BHK_RAW = [
+  ...room("Living Room", [
+    ["False Ceiling — gypsum board with cove groove", 0.65],
+    ["TV Unit — paneling with storage", 0.12],
+    ["Accent Wall Paneling — veneer / laminate", 0.15],
+    ["Crockery Unit — glass shutters + lighting", 0.15],
+    ["Cove / Profile Lighting", 0.5],
+  ]),
+  ...room("Kitchen", [
+    ["Modular Kitchen Base Unit", 0.35],
+    ["Modular Kitchen Wall Unit", 0.28],
+    ["Kitchen Counter — granite / quartz", 0.35],
+  ]),
+  ...room("Master Bedroom", [
+    ["Wardrobe — premium veneer finish", 0.22],
+    ["Bed Back Panel — upholstered", 0.1],
+    ["Dresser Unit — with mirror", 0.08],
+    ["Study / Work Desk — built-in", 0.25],
+  ]),
+  ...room("Bedroom 2", [
+    ["Wardrobe — laminate, soft-close", 0.18],
+    ["Bed Back Panel — upholstered", 0.1],
+    ["Study / Work Desk — built-in", 0.25],
+  ]),
+  ...room("Bedroom 3", [
+    ["Wardrobe — laminate, soft-close", 0.18],
+    ["Study / Work Desk — built-in", 0.25],
+  ]),
+  ...room("Bathrooms", [
+    ["Bathroom Vanity — marine ply + counter", 0.18],
+    ["Shower Glass Partition — 8mm toughened", 0.35],
+    ["Wall Mirror Panel", 0.1],
+  ]),
+  ...room("Foyer", [
+    ["Shoe Rack — with bench top", 0.2],
+    ["Foyer Console — with mirror", 0.18],
+    ["Wall Mirror Panel", 0.1],
+  ]),
+];
+
+const VILLA_RAW = [
+  ...room("Living Room", [
+    ["False Ceiling — gypsum board with cove groove", 0.65],
+    ["TV Unit — paneling with storage", 0.12],
+    ["Accent Wall Paneling — veneer / laminate", 0.15],
+    ["Cove / Profile Lighting", 0.5],
+  ]),
+  ...room("Dining", [
+    ["Crockery Unit — glass shutters + lighting", 0.15],
+    ["Accent Wall Paneling — veneer / laminate", 0.15],
+    ["Cove / Profile Lighting", 0.5],
+  ]),
+  ...room("Kitchen", [
+    ["Modular Kitchen Base Unit", 0.35],
+    ["Modular Kitchen Wall Unit", 0.28],
+    ["Kitchen Counter — granite / quartz", 0.35],
+  ]),
+  ...room("Master Bedroom", [
+    ["Wardrobe — premium veneer finish", 0.22],
+    ["Bed Back Panel — upholstered", 0.1],
+    ["Dresser Unit — with mirror", 0.08],
+    ["TV Unit — paneling with storage", 0.06],
+  ]),
+  ...room("Bedroom 2", [
+    ["Wardrobe — laminate, soft-close", 0.18],
+    ["Bed Back Panel — upholstered", 0.1],
+    ["Study / Work Desk — built-in", 0.25],
+  ]),
+  ...room("Study", [
+    ["Study / Work Desk — built-in", 0.25],
+    ["Wardrobe — laminate, soft-close", 0.1],
+  ]),
+  ...room("Bathrooms", [
+    ["Bathroom Vanity — marine ply + counter", 0.18],
+    ["Shower Glass Partition — 8mm toughened", 0.35],
+    ["Wall Mirror Panel", 0.1],
+  ]),
+  ...room("Staircase", [
+    ["Accent Wall Paneling — veneer / laminate", 0.15],
+    ["Cove / Profile Lighting", 0.5],
+  ]),
+];
 
 export const DEFAULT_PRESETS = {
   "1BHK": {
@@ -60,20 +224,8 @@ export const DEFAULT_PRESETS = {
     propertyType: "Apartment",
     propertyTypes: ["Apartment", "Studio Apartment"],
     sizeRange: "450-600",
-    scopeItems: [
-      work("Living Room", "False Ceiling — gypsum board with cove groove", 350),
-      work("Living Room", "TV Unit — paneling with storage", 28),
-      work("Living Room", "Cove / Profile Lighting", 30),
-      work("Kitchen", "Modular Kitchen Base Unit", 13),
-      work("Kitchen", "Modular Kitchen Wall Unit", 11),
-      work("Kitchen", "Kitchen Counter — granite / quartz", 12),
-      work("Master Bedroom", "Wardrobe — laminate, soft-close", 48),
-      work("Master Bedroom", "Bed Back Panel — upholstered", 30),
-      work("Master Bedroom", "Dresser Unit — with mirror", 12),
-      work("Bathrooms", "Bathroom Vanity — marine ply + counter", 4),
-      work("Bathrooms", "Shower Glass Partition — 8mm toughened", 21),
-      work("Bathrooms", "Wall Mirror Panel", 8),
-    ],
+    enableFormulaEstimator: true,
+    ...seedConfig("450-600", ONE_BHK_RAW),
     inclusions: COMMON_INCLUSIONS,
     exclusions: COMMON_EXCLUSIONS,
   },
@@ -82,26 +234,8 @@ export const DEFAULT_PRESETS = {
     propertyType: "Apartment",
     propertyTypes: ["Apartment", "Penthouse", "Duplex"],
     sizeRange: "800-1100",
-    scopeItems: [
-      work("Living Room", "False Ceiling — gypsum board with cove groove", 450),
-      work("Living Room", "TV Unit — paneling with storage", 35),
-      work("Living Room", "Crockery Unit — glass shutters + lighting", 18),
-      work("Living Room", "Cove / Profile Lighting", 50),
-      work("Kitchen", "Modular Kitchen Base Unit", 15),
-      work("Kitchen", "Modular Kitchen Wall Unit", 12),
-      work("Kitchen", "Kitchen Counter — granite / quartz", 20),
-      work("Master Bedroom", "Wardrobe — premium veneer finish", 42),
-      work("Master Bedroom", "Bed Back Panel — upholstered", 32),
-      work("Master Bedroom", "Dresser Unit — with mirror", 17),
-      work("Bedroom 2", "Wardrobe — laminate, soft-close", 50),
-      work("Bedroom 2", "Bed Back Panel — upholstered", 30),
-      work("Bedroom 2", "Study / Work Desk — built-in", 4),
-      work("Bathrooms", "Bathroom Vanity — marine ply + counter", 8),
-      work("Bathrooms", "Shower Glass Partition — 8mm toughened", 30),
-      work("Bathrooms", "Wall Mirror Panel", 18),
-      work("Foyer", "Shoe Rack — with bench top", 18),
-      work("Foyer", "Foyer Console — with mirror", 12),
-    ],
+    enableFormulaEstimator: true,
+    ...seedConfig("800-1100", TWO_BHK_RAW),
     inclusions: COMMON_INCLUSIONS,
     exclusions: COMMON_EXCLUSIONS,
   },
@@ -110,30 +244,8 @@ export const DEFAULT_PRESETS = {
     propertyType: "Apartment",
     propertyTypes: ["Apartment", "Penthouse", "Duplex", "Independent House"],
     sizeRange: "1200-1600",
-    scopeItems: [
-      work("Living Room", "False Ceiling — gypsum board with cove groove", 560),
-      work("Living Room", "TV Unit — paneling with storage", 42),
-      work("Living Room", "Crockery Unit — glass shutters + lighting", 24),
-      work("Living Room", "Accent Wall Paneling — veneer / laminate", 55),
-      work("Living Room", "Cove / Profile Lighting", 38),
-      work("Kitchen", "Modular Kitchen Base Unit", 18),
-      work("Kitchen", "Modular Kitchen Wall Unit", 15),
-      work("Kitchen", "Kitchen Counter — granite / quartz", 26),
-      work("Master Bedroom", "Wardrobe — premium veneer finish", 56),
-      work("Master Bedroom", "Bed Back Panel — upholstered", 34),
-      work("Master Bedroom", "Dresser Unit — with mirror", 22),
-      work("Bedroom 2", "Wardrobe — laminate, soft-close", 60),
-      work("Bedroom 2", "Bed Back Panel — upholstered", 32),
-      work("Bedroom 2", "Study / Work Desk — built-in", 3),
-      work("Bedroom 3", "Wardrobe — laminate, soft-close", 52),
-      work("Bedroom 3", "Bed Back Panel — upholstered", 30),
-      work("Bedroom 3", "Study / Work Desk — built-in", 3),
-      work("Bathrooms", "Bathroom Vanity — marine ply + counter", 12),
-      work("Bathrooms", "Shower Glass Partition — 8mm toughened", 40),
-      work("Bathrooms", "Wall Mirror Panel", 21),
-      work("Foyer", "Shoe Rack — with bench top", 20),
-      work("Foyer", "Foyer Console — with mirror", 15),
-    ],
+    enableFormulaEstimator: true,
+    ...seedConfig("1200-1600", THREE_BHK_RAW),
     inclusions: COMMON_INCLUSIONS,
     exclusions: COMMON_EXCLUSIONS,
   },
@@ -147,32 +259,8 @@ export const DEFAULT_PRESETS = {
       "Beach House",
     ],
     sizeRange: "2400+",
-    scopeItems: [
-      work("Living Room", "False Ceiling — gypsum board with cove groove", 800),
-      work("Living Room", "TV Unit — paneling with storage", 55),
-      work("Living Room", "Accent Wall Paneling — veneer / laminate", 90),
-      work("Living Room", "Crockery Unit — glass shutters + lighting", 30),
-      work("Living Room", "Cove / Profile Lighting", 145),
-      work("Dining", "Crockery Unit — glass shutters + lighting", 60),
-      work("Dining", "Accent Wall Paneling — veneer / laminate", 80),
-      work("Dining", "Cove / Profile Lighting", 88),
-      work("Kitchen", "Modular Kitchen Base Unit", 28),
-      work("Kitchen", "Modular Kitchen Wall Unit", 20),
-      work("Kitchen", "Kitchen Counter — granite / quartz", 35),
-      work("Master Bedroom", "Wardrobe — premium veneer finish", 90),
-      work("Master Bedroom", "Bed Back Panel — upholstered", 45),
-      work("Master Bedroom", "Dresser Unit — with mirror", 37),
-      work("Bedroom 2", "Wardrobe — laminate, soft-close", 120),
-      work("Bedroom 2", "Bed Back Panel — upholstered", 64),
-      work("Bedroom 2", "Dresser Unit — with mirror", 54),
-      work("Study", "Study / Work Desk — built-in", 20),
-      work("Study", "Wardrobe — laminate, soft-close", 16),
-      work("Bathrooms", "Bathroom Vanity — marine ply + counter", 16),
-      work("Bathrooms", "Shower Glass Partition — 8mm toughened", 70),
-      work("Bathrooms", "Wall Mirror Panel", 43),
-      work("Staircase", "Accent Wall Paneling — veneer / laminate", 120),
-      work("Staircase", "Cove / Profile Lighting", 70),
-    ],
+    enableFormulaEstimator: true,
+    ...seedConfig("2400+", VILLA_RAW),
     inclusions: COMMON_INCLUSIONS,
     exclusions: COMMON_EXCLUSIONS,
   },
@@ -185,14 +273,6 @@ export const DEFAULT_PRESETS = {
 // own snapshot.
 
 const MASTER_KEY = "quoteMaster";
-
-// Bump this whenever DEFAULT_PRESETS' baseline scope of work changes so a
-// stored master from an older seed is replaced with the new factory defaults
-// on the next read. The current value marks the scope of work being sourced
-// from the Item Master (DEFAULT_LIBRARY). User edits made AFTER a re-seed are
-// preserved — only masters from an older/absent seed are overwritten once.
-const SEED_VERSION_KEY = "quoteMasterSeedVersion";
-const SEED_VERSION = "2026.06-itemmaster";
 
 // ── Configurations-based normalisation ────────────────────────────────────
 // Each preset now stores a `configurations` array. Each entry in that array
@@ -315,59 +395,89 @@ const normalizeMaster = (master) => {
   return out;
 };
 
-export const getMaster = () => {
-  // Only trust a stored master if it was seeded by the CURRENT version. An
-  // older (or unversioned) master holds the pre-Item-Master scope of work and
-  // must be re-seeded from DEFAULT_PRESETS below.
-  let seedCurrent = false;
-  try {
-    seedCurrent = localStorage.getItem(SEED_VERSION_KEY) === SEED_VERSION;
-  } catch {
-    seedCurrent = false;
+// ── One-time migration: drop legacy static scope, reseed from Item Master ──
+// Presets saved before the Item Master seed (see DEFAULT_PRESETS above) carry
+// scope rows with no `masterId` — one hand-typed, lump-sum line per room that
+// can never be touched by grade switching or rate build-ups. Any config whose
+// scope is entirely unlinked like that is still on factory data the user
+// never customized, so it's safe to delete and replace wholesale with the
+// matching Item-Master-linked seed. A config gets left alone the moment a
+// single row carries a `masterId` (added via library / grade mapping), since
+// that signals real, user-driven scope work has happened on it.
+const SCOPE_SEED_VERSION_KEY = "quoteMasterScopeSeedVersion";
+// v1: seeded scope from the Item Master with hand-picked fixed quantities.
+// v2: quantities now come from the Smart Estimator's room-allocation split
+// instead of a fixed number, so bump the version to re-run the reseed once
+// more for v1 users.
+const SCOPE_SEED_VERSION = "2";
+let normalizedDefaultsCache = null;
+const getNormalizedDefaults = () => {
+  if (!normalizedDefaultsCache) {
+    normalizedDefaultsCache = normalizeMaster(DEFAULT_PRESETS);
   }
-  if (seedCurrent) {
-    try {
-      const raw = localStorage.getItem(MASTER_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === "object") {
-          const normalized = normalizeMaster(parsed);
-          localStorage.setItem(MASTER_KEY, JSON.stringify(normalized));
-          return normalized;
-        }
+  return normalizedDefaultsCache;
+};
+
+const reseedStaticScopeFromItemMaster = (master) => {
+  if (localStorage.getItem(SCOPE_SEED_VERSION_KEY) === SCOPE_SEED_VERSION) {
+    return master;
+  }
+  const defaults = getNormalizedDefaults();
+  const next = { ...master };
+  for (const key of Object.keys(next)) {
+    const defaultPreset = defaults[key];
+    if (!defaultPreset) continue; // user-created preset — nothing to reseed from
+    const configs = (next[key].configurations || []).map((cfg) => {
+      const isLegacyStatic =
+        (cfg.scopeItems || []).length > 0 &&
+        cfg.scopeItems.every((s) => !s.masterId);
+      if (!isLegacyStatic) return cfg;
+      const seedCfg =
+        defaultPreset.configurations.find((c) => c.propertyType === cfg.propertyType) ||
+        defaultPreset.configurations[0];
+      return {
+        ...cfg,
+        enableFormulaEstimator: seedCfg?.enableFormulaEstimator ?? cfg.enableFormulaEstimator,
+        totalArea: seedCfg?.totalArea ?? cfg.totalArea,
+        roomAllocations: seedCfg?.roomAllocations ?? cfg.roomAllocations,
+        scopeItems: (seedCfg?.scopeItems || []).map((s) => ({
+          ...s,
+          materials: (s.materials || []).map((m) => ({ ...m })),
+        })),
+      };
+    });
+    next[key] = { ...next[key], configurations: configs };
+  }
+  localStorage.setItem(SCOPE_SEED_VERSION_KEY, SCOPE_SEED_VERSION);
+  return next;
+};
+
+export const getMaster = () => {
+  try {
+    const raw = localStorage.getItem(MASTER_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        const normalized = reseedStaticScopeFromItemMaster(normalizeMaster(parsed));
+        localStorage.setItem(MASTER_KEY, JSON.stringify(normalized));
+        return normalized;
       }
-    } catch {
-      // fall through to defaults
     }
+  } catch {
+    // fall through to defaults
   }
   const normalizedDefault = normalizeMaster(DEFAULT_PRESETS);
   localStorage.setItem(MASTER_KEY, JSON.stringify(normalizedDefault));
-  try {
-    localStorage.setItem(SEED_VERSION_KEY, SEED_VERSION);
-  } catch {
-    // version stamp is best-effort
-  }
+  localStorage.setItem(SCOPE_SEED_VERSION_KEY, SCOPE_SEED_VERSION);
   return normalizedDefault;
 };
 
 export const saveMaster = (master) => {
   localStorage.setItem(MASTER_KEY, JSON.stringify(master));
-  // Stamp the current seed so user edits made after a re-seed are kept on the
-  // next read rather than being overwritten by the factory defaults.
-  try {
-    localStorage.setItem(SEED_VERSION_KEY, SEED_VERSION);
-  } catch {
-    // best-effort
-  }
 };
 
 export const resetMaster = () => {
   localStorage.removeItem(MASTER_KEY);
-  try {
-    localStorage.removeItem(SEED_VERSION_KEY);
-  } catch {
-    // best-effort
-  }
 };
 
 export const getPresets = () => getMaster();

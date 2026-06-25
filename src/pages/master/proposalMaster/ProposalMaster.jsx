@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import {
   Plus,
   Trash2,
-  Save,
   Check,
   X,
   Copy,
@@ -42,19 +41,26 @@ import {
   saveMaster,
   computeTotals,
   GST_RATE,
+  DEFAULT_PRESETS,
 } from "../../../data/QuotePresets";
 import { formatAmount } from "../../../utils/formatAmount";
 import {
   validateSizeRangeInput,
   formatSizeRange,
-  cleanSizeRange,
 } from "../../../utils/sizeRangeValidation";
-import { DIMENSIONAL_UNITS } from "../../../data/boqStorage";
 import { UNITS } from "../../../data/boqUnits";
 import {
   assignCategoryNames,
   addScopeItemsWithDuplicateCheck,
 } from "../../../utils/scopeNaming";
+import {
+  scopeRoomKey,
+  parseBaseArea,
+  getNormalizedAllocations,
+  initializeFormulasForItems,
+  recalculateScopeItems,
+  getNormalizedConfig,
+} from "../../../data/scopeEstimator";
 import ItemFormModal from "../../../components/ItemFormModal";
 import Modal from "../../../components/Modal";
 import {
@@ -76,199 +82,6 @@ import {
   removePropertyTypeGlobally,
   isPropertyTypeInUse,
 } from "../../../data/propertyTypeStorage";
-
-// ── Smart Estimator Helper Functions ─────────────────────────────────────────
-
-const evaluateFormula = (formulaStr, variables = {}) => {
-  if (!formulaStr) return 0;
-  try {
-    let sanitized = formulaStr;
-    Object.keys(variables).forEach((name) => {
-      const regex = new RegExp(`\\b${name}\\b`, "gi");
-      sanitized = sanitized.replace(regex, variables[name]);
-    });
-    sanitized = sanitized.replace(/[a-zA-Z]/g, "");
-    const result = new Function(`return (${sanitized});`)();
-    return typeof result === "number" && !isNaN(result) ? Math.round(result * 100) / 100 : 0;
-  } catch {
-    return 0;
-  }
-};
-
-const scopeRoomKey = (item) =>
-  (item.area || item.heading || "Unassigned").trim().toUpperCase();
-
-// Base carpet area from the size range: single → itself, range → midpoint.
-const parseBaseArea = (sizeRange) => {
-  const nums = (cleanSizeRange(sizeRange || "").match(/\d+/g) || [])
-    .map(Number)
-    .filter((n) => n > 0);
-  if (!nums.length) return 0;
-  return Math.round(nums.reduce((a, b) => a + b, 0) / nums.length);
-};
-
-const isAreaUnit = (unit) => unit === "sqft" || unit === "sqm";
-const isLengthUnit = (unit) => unit === "rmt" || unit === "rft" || unit === "mm";
-const isCountUnit = (unit) => ["nos", "set", "pair", "lot", "ls", "day"].includes(unit);
-
-const roundQty = (value) => Math.round((Number(value) || 0) * 100) / 100;
-
-const getUnitBaseForItem = (item, roomArea) => {
-  const unit = item.unit || "sqft";
-  if (isAreaUnit(unit)) return roomArea;
-  if (isLengthUnit(unit)) return Math.max(1, Math.sqrt(roomArea) * 4);
-  if (isCountUnit(unit)) return 1;
-  return roomArea;
-};
-
-const defaultQtyFormulaForItem = (item) => {
-  const unit = item.unit || "sqft";
-  const factor = Number(item.areaFactor) > 0 ? Number(item.areaFactor) : 1;
-  if (isAreaUnit(unit) || isLengthUnit(unit)) return `A * ${factor}`;
-  return `${factor}`;
-};
-
-const formulaVars = ({ unitBase, roomArea, totalArea, count }) => ({
-  A: unitBase,
-  Area: unitBase,
-  area: unitBase,
-  UnitBase: unitBase,
-  unitBase,
-  RoomArea: roomArea,
-  roomArea,
-  TotalArea: totalArea,
-  totalArea,
-  Count: count,
-  count,
-});
-
-const getNormalizedAllocations = (scopeItems, savedAllocs = {}) => {
-  const rooms = Array.from(
-    new Set((scopeItems || []).map(scopeRoomKey))
-  );
-  if (rooms.length === 0) return {};
-
-  const defaults = {
-    "LIVING ROOM": 30,
-    "KITCHEN": 20,
-    "MASTER BEDROOM": 25,
-    "BEDROOM 2": 15,
-    "BEDROOM 3": 15,
-    "BATHROOMS": 10,
-    "FOYER": 5,
-    "DINING": 12,
-    "STUDY": 8,
-    "STAIRCASE": 5,
-    "UTILITY": 5,
-  };
-
-  const rawAllocs = {};
-  rooms.forEach((room) => {
-    if (typeof savedAllocs[room] === "number" && !isNaN(savedAllocs[room])) {
-      rawAllocs[room] = savedAllocs[room];
-    } else {
-      rawAllocs[room] = defaults[room] !== undefined ? defaults[room] : 10;
-    }
-  });
-
-  const sum = Object.values(rawAllocs).reduce((s, val) => s + val, 0);
-  const normalized = {};
-  if (sum > 0) {
-    let tempSum = 0;
-    rooms.forEach((room) => {
-      const pct = Math.round((rawAllocs[room] / sum) * 100);
-      normalized[room] = pct;
-      tempSum += pct;
-    });
-
-    const diff = 100 - tempSum;
-    if (diff !== 0 && rooms.length > 0) {
-      const keyToAdjust = rooms.reduce((a, b) => normalized[a] > normalized[b] ? a : b, rooms[0]);
-      normalized[keyToAdjust] = Math.max(0, normalized[keyToAdjust] + diff);
-    }
-  } else {
-    const share = Math.floor(100 / rooms.length);
-    rooms.forEach((room, idx) => {
-      normalized[room] = idx === 0 ? 100 - share * (rooms.length - 1) : share;
-    });
-  }
-
-  return normalized;
-};
-
-const estimateScopeItems = (items, areaVal, allocsVal) => {
-  const roomCounts = {};
-  (items || []).forEach((item) => {
-    const normRoom = scopeRoomKey(item);
-    roomCounts[normRoom] = (roomCounts[normRoom] || 0) + 1;
-  });
-
-  return (items || []).map((item) => {
-    const normRoom = scopeRoomKey(item);
-    const pct = allocsVal[normRoom] !== undefined ? allocsVal[normRoom] : 10;
-    const roomArea = Math.round(areaVal * (pct / 100)) || 100;
-    const count = roomCounts[normRoom] || 1;
-    const unitBase = roundQty(getUnitBaseForItem(item, roomArea)) || 1;
-    const vars = formulaVars({ unitBase, roomArea, totalArea: areaVal, count });
-    const qtyFormula = item.qtyFormula || defaultQtyFormulaForItem(item);
-    const calculatedQty = evaluateFormula(qtyFormula, vars);
-    const previousAmount = Number(item.amount) || 0;
-    const previousQty = Number(item.qty) || 0;
-    const finalRate =
-      Number(item.rate) ||
-      Math.round((previousAmount / (calculatedQty || previousQty || unitBase || 1)) * 100) / 100 ||
-      0;
-    const amount = Math.round(calculatedQty * finalRate);
-
-    const materials = (item.materials || []).map((m) => {
-      const consFormula = m.consumptionFormula || "Q * 4.5";
-      const matQty = evaluateFormula(consFormula, { ...vars, Q: calculatedQty, Qty: calculatedQty });
-      return {
-        ...m,
-        consumptionFormula: consFormula,
-        qty: matQty,
-      };
-    });
-
-    return {
-      ...item,
-      qtyFormula,
-      qty: calculatedQty,
-      estimatorBaseQty: unitBase,
-      estimatorRoomArea: roomArea,
-      rate: finalRate,
-      amount,
-      materials,
-    };
-  });
-};
-
-const initializeFormulasForItems = estimateScopeItems;
-
-const recalculateScopeItems = (items, areaVal, allocsVal, enabled) => {
-  if (!enabled) return items;
-  return estimateScopeItems(items, areaVal, allocsVal);
-};
-
-const getNormalizedConfig = (config) => {
-  if (!config) return config;
-  const enableFormulaEstimator = config.enableFormulaEstimator ?? false;
-  const totalArea = config.totalArea || parseBaseArea(config.sizeRange) || 1000;
-  const roomAllocations = getNormalizedAllocations(config.scopeItems, config.roomAllocations || {});
-
-  let scopeItems = config.scopeItems || [];
-  if (enableFormulaEstimator) {
-    scopeItems = initializeFormulasForItems(scopeItems, totalArea, roomAllocations);
-  }
-
-  return {
-    ...config,
-    enableFormulaEstimator,
-    totalArea,
-    roomAllocations,
-    scopeItems,
-  };
-};
 
 const blankPreset = (propertyType = "Apartment") => ({
   label: "New Preset",
@@ -378,7 +191,6 @@ const ProposalMaster = () => {
   });
   const [showAddPreset, setShowAddPreset] = useState(false);
   const [newPresetKey, setNewPresetKey] = useState("");
-  const [savedFlash, setSavedFlash] = useState(false);
   const [expanded, setExpanded] = useState({});
   const [presetSearch, setPresetSearch] = useState("");
   const [toast, setToast] = useState(null);
@@ -428,63 +240,6 @@ const ProposalMaster = () => {
   const openEditScope = (idx) => {
     setEditingScopeIdx(idx);
     setScopeFormOpen(true);
-  };
-
-  // The work's estimating factor, from the Item Master (matched by name).
-  const masterAreaFactorFor = (name) => {
-    const n = (name || "").trim().toLowerCase();
-    if (!n) return 1;
-    const lib = listLibrary();
-    const hit =
-      lib.find((it) => (it.description || "").trim().toLowerCase() === n) ||
-      lib.find((it) => (it.description || "").toLowerCase().includes(n));
-    return hit && Number(hit.areaFactor) > 0 ? Number(hit.areaFactor) : 1;
-  };
-
-  // One-click: estimate every work's assumed qty from the package size range.
-  // Dimensional works (sqft/rft) = area × factor; count (nos) works = factor.
-  const autofillQtyFromSize = () => {
-    const baseArea = parseBaseArea(activeConfig?.sizeRange);
-    if (!baseArea) {
-      showToast("Set a valid size range first (e.g. 300 or 300-400)", "error");
-      return;
-    }
-    let n = 0;
-    setConfigField((cfg) => {
-      if (cfg.enableFormulaEstimator) {
-        n = (cfg.scopeItems || []).length;
-        const totalArea = cfg.totalArea || baseArea;
-        const allocations = getNormalizedAllocations(
-          cfg.scopeItems,
-          cfg.roomAllocations || {},
-        );
-        return {
-          ...cfg,
-          totalArea,
-          roomAllocations: allocations,
-          scopeItems: recalculateScopeItems(
-            cfg.scopeItems || [],
-            totalArea,
-            allocations,
-            true,
-          ),
-        };
-      }
-
-      return {
-        ...cfg,
-        scopeItems: (cfg.scopeItems || []).map((s) => {
-          const factor = masterAreaFactorFor(s.itemName || s.description);
-          const dimensional = !!DIMENSIONAL_UNITS[s.unit || "nos"];
-          const qty = dimensional
-            ? Math.round(baseArea * factor)
-            : Math.max(1, Math.round(factor));
-          n += 1;
-          return { ...s, qty, amount: computeLibraryItemAmount({ ...s, qty }) };
-        }),
-      };
-    });
-    showToast(`Estimated ${n} qty from ${baseArea} sqft`, "success");
   };
 
   // Map a scope row → the flat form shape ItemFormModal expects. Rate-based:
@@ -543,18 +298,14 @@ const ProposalMaster = () => {
     availableGrades[0]?.key ||
     "economy";
 
-  // Auto-save: persist every change to the master immediately, then briefly
-  // flash a "Saved" indicator. No manual save step.
+  // Every edit to `master` is persisted immediately — there is no separate
+  // "Save Changes" step, so this is the only place that writes to storage.
   useEffect(() => {
     if (isInitial) {
       setIsInitial(false);
       return;
     }
     saveMaster(master);
-    setSavedFlash(true);
-    const t = setTimeout(() => setSavedFlash(false), 1500);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [master]);
 
   const showToast = (message, type = "success") => {
@@ -1045,31 +796,16 @@ const ProposalMaster = () => {
     });
   };
 
-  // Changes auto-save (see the effect above). This runs the size-range
-  // validation on demand (Ctrl/Cmd+S) and confirms the save with a toast.
-  const handleManualSave = () => {
-    const currentSizeRange = activeConfig?.sizeRange || "";
-    const err = validateSizeRangeInput(currentSizeRange);
-    if (err) {
-      showToast(err, "error");
-      setSizeRangeError(err);
-      return;
-    }
-    saveMaster(master);
-    setSavedFlash(true);
-    setTimeout(() => setSavedFlash(false), 1500);
-    showToast("All changes saved", "success");
-  };
-
   const toggleExpanded = (idx) => {
     setExpanded((p) => ({ ...p, [idx]: !p[idx] }));
   };
 
   useEffect(() => {
     const onKey = (e) => {
+      // Changes already autosave — just swallow the browser's native
+      // "Save Page As" shortcut so it doesn't hijack the keystroke.
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
-        handleManualSave();
       }
       if (e.key === "Escape") {
         setConfirmDialog(null);
@@ -1081,7 +817,6 @@ const ProposalMaster = () => {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const filteredKeys = useMemo(() => {
@@ -1213,7 +948,7 @@ const ProposalMaster = () => {
               </div>
               <p className="text-[12px] text-text-muted mt-0.5">
                 Quotation templates per property preset · changes apply
-                instantly to new proposals
+                instantly to new proposals and save automatically
               </p>
             </div>
           </div>
@@ -1226,18 +961,6 @@ const ProposalMaster = () => {
             >
               <Keyboard size={12} />
             </button>
-
-            <div
-              title="Changes are saved automatically"
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-[12px] font-semibold border transition-all ${
-                savedFlash
-                  ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                  : "bg-bg-soft text-text-muted border-bordergray"
-              }`}
-            >
-              {savedFlash ? <Check size={13} /> : <Save size={13} />}
-              {savedFlash ? "Saved" : "Auto-saved"}
-            </div>
           </div>
         </div>
 
@@ -1903,15 +1626,6 @@ const ProposalMaster = () => {
                       );
                     })}
                   </div>
-                  <button
-                    type="button"
-                    onClick={autofillQtyFromSize}
-                    disabled={scopeItems.length === 0}
-                    title="Estimate each work's assumed quantity from the size range × the Item Master factor"
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-select-blue/30 bg-select-blue/5 text-[11px] font-semibold text-select-blue hover:bg-select-blue/10 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    <Sparkles size={12} /> Auto-fill qty
-                  </button>
                   <button
                     type="button"
                     onClick={() => setPreviewOpen(true)}
@@ -3136,7 +2850,6 @@ const ShortcutsModal = ({ onClose }) => (
         </button>
       </div>
       <div className="p-5 space-y-2.5">
-        <Shortcut keys={["⌘", "S"]} label="Save changes" />
         <Shortcut keys={["?"]} label="Toggle this menu" />
         <Shortcut keys={["Esc"]} label="Close dialogs" />
         <Shortcut keys={["Enter"]} label="Confirm in input fields" />

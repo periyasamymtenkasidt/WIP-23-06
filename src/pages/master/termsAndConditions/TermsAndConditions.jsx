@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Plus,
@@ -238,13 +238,18 @@ const TermsAndConditions = () => {
   const subFromUrl = searchParams.get("sub");
 
   const [categories, setCategories] = useState(() => getTermsCategories());
-  const [selectedCategory, setSelectedCategory] = useState(() => {
-    const cats = getTermsCategories();
-    if (subFromUrl && cats.some((c) => c.id === subFromUrl)) {
+  // Derived from the URL, not its own state — a click sets the URL via
+  // setSearchParams, and selectedCategory follows it immediately on the same
+  // render. Keeping a separate state in sync with the URL via an effect
+  // caused a double-transition: the click moved selectedCategory to the new
+  // card, then the effect snapped it back to the not-yet-updated URL value
+  // before the URL caught up and it moved forward again.
+  const selectedCategory = useMemo(() => {
+    if (subFromUrl && categories.some((c) => c.id === subFromUrl)) {
       return subFromUrl;
     }
-    return cats.length > 0 ? cats[0].id : "STATUATORY";
-  });
+    return categories.length > 0 ? categories[0].id : "STATUATORY";
+  }, [subFromUrl, categories]);
 
   const [localData, setLocalData] = useState({
     inclusions: [],
@@ -265,12 +270,6 @@ const TermsAndConditions = () => {
     catId: "",
     catLabel: "",
   });
-
-  useEffect(() => {
-    if (subFromUrl && categories.some((c) => c.id === subFromUrl) && selectedCategory !== subFromUrl) {
-      setSelectedCategory(subFromUrl);
-    }
-  }, [subFromUrl, categories, selectedCategory]);
 
   useEffect(() => {
     if (selectedCategory) {
@@ -317,7 +316,6 @@ const TermsAndConditions = () => {
   };
 
   const handleSelectCategory = (catId) => {
-    setSelectedCategory(catId);
     setSearchParams({ tab: "terms", sub: catId });
   };
 
@@ -335,7 +333,6 @@ const TermsAndConditions = () => {
         const newCat = addTermsCategory(name, desc || undefined);
         const updatedCats = getTermsCategories();
         setCategories(updatedCats);
-        setSelectedCategory(newCat.id);
         setSearchParams({ tab: "terms", sub: newCat.id });
         setModalState({ isOpen: false, mode: "create", catId: "", inputValue: "", descValue: "", error: "" });
       } catch (err) {
@@ -366,10 +363,10 @@ const TermsAndConditions = () => {
     const updatedCats = getTermsCategories();
     setCategories(updatedCats);
 
-    // Reset selected category if we deleted the current one
+    // Point the URL at the next category if we deleted the current one —
+    // selectedCategory derives from it, so it'll follow automatically.
     if (selectedCategory === id) {
       const nextCatId = updatedCats.length > 0 ? updatedCats[0].id : "";
-      setSelectedCategory(nextCatId);
       if (nextCatId) {
         setSearchParams({ tab: "terms", sub: nextCatId });
       } else {

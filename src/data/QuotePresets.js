@@ -6,6 +6,7 @@
 import { getRoomDefaultDays } from "./scheduleConfig";
 import { cleanSizeRange } from "../utils/sizeRangeValidation";
 import { normalizeScopeItem } from "../utils/scopeNaming";
+import { DEFAULT_LIBRARY } from "./itemLibrary";
 
 export const GST_RATE = 18;
 
@@ -13,32 +14,45 @@ const COMMON_INCLUSIONS = [];
 
 const COMMON_EXCLUSIONS = [];
 
-// Material-spec sets reused across multiple presets. Each entry is shown
-// inline under its scope row in the rendered quote (Plywood: BWP 19mm…).
-const MAT_LIVING = [
-  { name: "Plywood", spec: "MR 18mm" },
-  { name: "Laminate", spec: "Greenply / Century" },
-  { name: "Lighting", spec: "Philips / Wipro LED" },
-];
-const MAT_KITCHEN = [
-  { name: "Plywood", spec: "BWP 19mm" },
-  { name: "Hardware", spec: "Hettich / Hafele" },
-  { name: "Counter", spec: "Granite slab" },
-];
-const MAT_BEDROOM = [
-  { name: "Plywood", spec: "MR 16mm" },
-  { name: "Laminate", spec: "Century / Greenply" },
-  { name: "Hardware", spec: "Hafele soft-close" },
-];
-const MAT_BATHROOM = [
-  { name: "Vanity", spec: "Marine ply + laminate" },
-  { name: "Mirror", spec: "Saint-Gobain 5mm" },
-  { name: "Hardware", spec: "Jaquar / Hindware" },
-];
-const MAT_FOYER = [
-  { name: "Plywood", spec: "MR 16mm" },
-  { name: "Laminate", spec: "Greenply" },
-];
+// ── Scope of Work, sourced from the Item Master ────────────────────────────
+// Every preset's scope of work is composed from the SAME catalog the BOQ and
+// rate build-up use (DEFAULT_LIBRARY in itemLibrary.js). Each row carries the
+// item's real unit, ₹/unit rate, HSN, lead-time and material specs, and links
+// back to its catalog item by name (itemName === library description) so grade
+// re-mapping and rate build-ups resolve cleanly. The only per-preset input is
+// the room each work sits in and an assumed package quantity.
+const LIB_BY_NAME = DEFAULT_LIBRARY.reduce((map, it) => {
+  map[it.description] = it;
+  return map;
+}, {});
+
+// Build one scope row from an Item Master work: room + assumed package qty.
+// rate, unit, days, HSN and materials come straight from the catalog;
+// amount = qty × rate. The description is a spec line derived from the item's
+// own materials so the quote shows what each work is made of.
+const work = (room, name, qty) => {
+  const lib = LIB_BY_NAME[name];
+  if (!lib) {
+    throw new Error(`Proposal Master: unknown Item Master work "${name}"`);
+  }
+  const materials = (lib.materials || []).map((m) => ({ ...m }));
+  const description = materials.length
+    ? materials.map((m) => `${m.name}: ${m.spec}`).join(" · ")
+    : name;
+  return {
+    area: room,
+    itemName: name,
+    description,
+    unit: lib.unit,
+    rate: lib.rate,
+    qty,
+    amount: Math.round(qty * lib.rate),
+    days: lib.days,
+    hsn: lib.hsn,
+    gstPercent: lib.gstPercent,
+    materials,
+  };
+};
 
 export const DEFAULT_PRESETS = {
   "1BHK": {
@@ -47,10 +61,18 @@ export const DEFAULT_PRESETS = {
     propertyTypes: ["Apartment", "Studio Apartment"],
     sizeRange: "450-600",
     scopeItems: [
-      { area: "Living Room", description: "False ceiling, accent wall, TV unit, lighting", amount: 80000, days: 20, materials: MAT_LIVING },
-      { area: "Kitchen", description: "Modular kitchen — base + wall units, granite, chimney, hob", amount: 150000, days: 15, materials: MAT_KITCHEN },
-      { area: "Master Bedroom", description: "Wardrobe, bed back panel, study unit, lighting", amount: 90000, days: 12, materials: MAT_BEDROOM },
-      { area: "Bathrooms", description: "Vanity, mirror, shower partition, accessories", amount: 30000, days: 6, materials: MAT_BATHROOM },
+      work("Living Room", "False Ceiling — gypsum board with cove groove", 350),
+      work("Living Room", "TV Unit — paneling with storage", 28),
+      work("Living Room", "Cove / Profile Lighting", 30),
+      work("Kitchen", "Modular Kitchen Base Unit", 13),
+      work("Kitchen", "Modular Kitchen Wall Unit", 11),
+      work("Kitchen", "Kitchen Counter — granite / quartz", 12),
+      work("Master Bedroom", "Wardrobe — laminate, soft-close", 48),
+      work("Master Bedroom", "Bed Back Panel — upholstered", 30),
+      work("Master Bedroom", "Dresser Unit — with mirror", 12),
+      work("Bathrooms", "Bathroom Vanity — marine ply + counter", 4),
+      work("Bathrooms", "Shower Glass Partition — 8mm toughened", 21),
+      work("Bathrooms", "Wall Mirror Panel", 8),
     ],
     inclusions: COMMON_INCLUSIONS,
     exclusions: COMMON_EXCLUSIONS,
@@ -61,12 +83,24 @@ export const DEFAULT_PRESETS = {
     propertyTypes: ["Apartment", "Penthouse", "Duplex"],
     sizeRange: "800-1100",
     scopeItems: [
-      { area: "Living Room", description: "Living + dining — false ceiling, TV unit, crockery unit, lighting", amount: 130000, days: 20, materials: MAT_LIVING },
-      { area: "Kitchen", description: "L-shaped modular kitchen, granite, chimney, hob, water purifier provision", amount: 180000, days: 15, materials: MAT_KITCHEN },
-      { area: "Master Bedroom", description: "Wardrobe, bed back panel, dresser, lighting", amount: 110000, days: 12, materials: MAT_BEDROOM },
-      { area: "Bedroom 2", description: "Wardrobe, study unit, lighting", amount: 95000, days: 10, materials: MAT_BEDROOM },
-      { area: "Bathrooms", description: "Vanity, mirror, shower partition, accessories (×2)", amount: 55000, days: 6, materials: MAT_BATHROOM },
-      { area: "Foyer", description: "Foyer & passage — shoe rack, console, accent paint, lighting", amount: 30000, days: 5, materials: MAT_FOYER },
+      work("Living Room", "False Ceiling — gypsum board with cove groove", 450),
+      work("Living Room", "TV Unit — paneling with storage", 35),
+      work("Living Room", "Crockery Unit — glass shutters + lighting", 18),
+      work("Living Room", "Cove / Profile Lighting", 50),
+      work("Kitchen", "Modular Kitchen Base Unit", 15),
+      work("Kitchen", "Modular Kitchen Wall Unit", 12),
+      work("Kitchen", "Kitchen Counter — granite / quartz", 20),
+      work("Master Bedroom", "Wardrobe — premium veneer finish", 42),
+      work("Master Bedroom", "Bed Back Panel — upholstered", 32),
+      work("Master Bedroom", "Dresser Unit — with mirror", 17),
+      work("Bedroom 2", "Wardrobe — laminate, soft-close", 50),
+      work("Bedroom 2", "Bed Back Panel — upholstered", 30),
+      work("Bedroom 2", "Study / Work Desk — built-in", 4),
+      work("Bathrooms", "Bathroom Vanity — marine ply + counter", 8),
+      work("Bathrooms", "Shower Glass Partition — 8mm toughened", 30),
+      work("Bathrooms", "Wall Mirror Panel", 18),
+      work("Foyer", "Shoe Rack — with bench top", 18),
+      work("Foyer", "Foyer Console — with mirror", 12),
     ],
     inclusions: COMMON_INCLUSIONS,
     exclusions: COMMON_EXCLUSIONS,
@@ -77,13 +111,28 @@ export const DEFAULT_PRESETS = {
     propertyTypes: ["Apartment", "Penthouse", "Duplex", "Independent House"],
     sizeRange: "1200-1600",
     scopeItems: [
-      { area: "Living Room", description: "Living + dining — designer false ceiling, TV unit, bar/crockery unit, accent wall, lighting", amount: 180000, days: 20, materials: MAT_LIVING },
-      { area: "Kitchen", description: "U-shaped modular kitchen, premium granite, chimney, hob, tall units", amount: 220000, days: 15, materials: MAT_KITCHEN },
-      { area: "Master Bedroom", description: "Wardrobe with loft, bed back panel, dresser, study, lighting", amount: 140000, days: 12, materials: MAT_BEDROOM },
-      { area: "Bedroom 2", description: "Wardrobe, bed back panel, study unit, lighting", amount: 105000, days: 10, materials: MAT_BEDROOM },
-      { area: "Bedroom 3", description: "Kids room — wardrobe, bunk/study unit, lighting", amount: 95000, days: 10, materials: MAT_BEDROOM },
-      { area: "Bathrooms", description: "Vanity, mirror, shower partition, accessories (×3)", amount: 75000, days: 6, materials: MAT_BATHROOM },
-      { area: "Foyer", description: "Foyer & passage — shoe rack, console, accent paint, lighting", amount: 35000, days: 5, materials: MAT_FOYER },
+      work("Living Room", "False Ceiling — gypsum board with cove groove", 560),
+      work("Living Room", "TV Unit — paneling with storage", 42),
+      work("Living Room", "Crockery Unit — glass shutters + lighting", 24),
+      work("Living Room", "Accent Wall Paneling — veneer / laminate", 55),
+      work("Living Room", "Cove / Profile Lighting", 38),
+      work("Kitchen", "Modular Kitchen Base Unit", 18),
+      work("Kitchen", "Modular Kitchen Wall Unit", 15),
+      work("Kitchen", "Kitchen Counter — granite / quartz", 26),
+      work("Master Bedroom", "Wardrobe — premium veneer finish", 56),
+      work("Master Bedroom", "Bed Back Panel — upholstered", 34),
+      work("Master Bedroom", "Dresser Unit — with mirror", 22),
+      work("Bedroom 2", "Wardrobe — laminate, soft-close", 60),
+      work("Bedroom 2", "Bed Back Panel — upholstered", 32),
+      work("Bedroom 2", "Study / Work Desk — built-in", 3),
+      work("Bedroom 3", "Wardrobe — laminate, soft-close", 52),
+      work("Bedroom 3", "Bed Back Panel — upholstered", 30),
+      work("Bedroom 3", "Study / Work Desk — built-in", 3),
+      work("Bathrooms", "Bathroom Vanity — marine ply + counter", 12),
+      work("Bathrooms", "Shower Glass Partition — 8mm toughened", 40),
+      work("Bathrooms", "Wall Mirror Panel", 21),
+      work("Foyer", "Shoe Rack — with bench top", 20),
+      work("Foyer", "Foyer Console — with mirror", 15),
     ],
     inclusions: COMMON_INCLUSIONS,
     exclusions: COMMON_EXCLUSIONS,
@@ -99,14 +148,30 @@ export const DEFAULT_PRESETS = {
     ],
     sizeRange: "2400+",
     scopeItems: [
-      { area: "Living Room", description: "Foyer & living — double-height ceiling treatment, TV unit, accent walls, designer lighting", amount: 280000, days: 20, materials: MAT_LIVING },
-      { area: "Dining", description: "Formal & family dining — crockery unit, accent wall, statement lighting", amount: 150000, days: 10, materials: MAT_LIVING },
-      { area: "Kitchen", description: "Premium modular kitchen, island, tall units, utility cabinetry", amount: 320000, days: 15, materials: MAT_KITCHEN },
-      { area: "Master Bedroom", description: "Suite — walk-in wardrobe, bed back panel, dresser, lounge unit, lighting", amount: 220000, days: 12, materials: MAT_BEDROOM },
-      { area: "Bedroom 2", description: "Wardrobes, bed back panels, study units, lighting (×2)", amount: 240000, days: 10, materials: MAT_BEDROOM },
-      { area: "Study", description: "Home office — built-in desk, storage, lighting", amount: 90000, days: 8, materials: MAT_BEDROOM },
-      { area: "Bathrooms", description: "Vanity, mirror, shower partition, accessories (×4)", amount: 120000, days: 6, materials: MAT_BATHROOM },
-      { area: "Staircase", description: "Staircase & common areas — railing finishing, accent walls, lighting", amount: 80000, days: 6, materials: MAT_FOYER },
+      work("Living Room", "False Ceiling — gypsum board with cove groove", 800),
+      work("Living Room", "TV Unit — paneling with storage", 55),
+      work("Living Room", "Accent Wall Paneling — veneer / laminate", 90),
+      work("Living Room", "Crockery Unit — glass shutters + lighting", 30),
+      work("Living Room", "Cove / Profile Lighting", 145),
+      work("Dining", "Crockery Unit — glass shutters + lighting", 60),
+      work("Dining", "Accent Wall Paneling — veneer / laminate", 80),
+      work("Dining", "Cove / Profile Lighting", 88),
+      work("Kitchen", "Modular Kitchen Base Unit", 28),
+      work("Kitchen", "Modular Kitchen Wall Unit", 20),
+      work("Kitchen", "Kitchen Counter — granite / quartz", 35),
+      work("Master Bedroom", "Wardrobe — premium veneer finish", 90),
+      work("Master Bedroom", "Bed Back Panel — upholstered", 45),
+      work("Master Bedroom", "Dresser Unit — with mirror", 37),
+      work("Bedroom 2", "Wardrobe — laminate, soft-close", 120),
+      work("Bedroom 2", "Bed Back Panel — upholstered", 64),
+      work("Bedroom 2", "Dresser Unit — with mirror", 54),
+      work("Study", "Study / Work Desk — built-in", 20),
+      work("Study", "Wardrobe — laminate, soft-close", 16),
+      work("Bathrooms", "Bathroom Vanity — marine ply + counter", 16),
+      work("Bathrooms", "Shower Glass Partition — 8mm toughened", 70),
+      work("Bathrooms", "Wall Mirror Panel", 43),
+      work("Staircase", "Accent Wall Paneling — veneer / laminate", 120),
+      work("Staircase", "Cove / Profile Lighting", 70),
     ],
     inclusions: COMMON_INCLUSIONS,
     exclusions: COMMON_EXCLUSIONS,
@@ -120,6 +185,14 @@ export const DEFAULT_PRESETS = {
 // own snapshot.
 
 const MASTER_KEY = "quoteMaster";
+
+// Bump this whenever DEFAULT_PRESETS' baseline scope of work changes so a
+// stored master from an older seed is replaced with the new factory defaults
+// on the next read. The current value marks the scope of work being sourced
+// from the Item Master (DEFAULT_LIBRARY). User edits made AFTER a re-seed are
+// preserved — only masters from an older/absent seed are overwritten once.
+const SEED_VERSION_KEY = "quoteMasterSeedVersion";
+const SEED_VERSION = "2026.06-itemmaster";
 
 // ── Configurations-based normalisation ────────────────────────────────────
 // Each preset now stores a `configurations` array. Each entry in that array
@@ -243,30 +316,58 @@ const normalizeMaster = (master) => {
 };
 
 export const getMaster = () => {
+  // Only trust a stored master if it was seeded by the CURRENT version. An
+  // older (or unversioned) master holds the pre-Item-Master scope of work and
+  // must be re-seeded from DEFAULT_PRESETS below.
+  let seedCurrent = false;
   try {
-    const raw = localStorage.getItem(MASTER_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === "object") {
-        const normalized = normalizeMaster(parsed);
-        localStorage.setItem(MASTER_KEY, JSON.stringify(normalized));
-        return normalized;
-      }
-    }
+    seedCurrent = localStorage.getItem(SEED_VERSION_KEY) === SEED_VERSION;
   } catch {
-    // fall through to defaults
+    seedCurrent = false;
+  }
+  if (seedCurrent) {
+    try {
+      const raw = localStorage.getItem(MASTER_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") {
+          const normalized = normalizeMaster(parsed);
+          localStorage.setItem(MASTER_KEY, JSON.stringify(normalized));
+          return normalized;
+        }
+      }
+    } catch {
+      // fall through to defaults
+    }
   }
   const normalizedDefault = normalizeMaster(DEFAULT_PRESETS);
   localStorage.setItem(MASTER_KEY, JSON.stringify(normalizedDefault));
+  try {
+    localStorage.setItem(SEED_VERSION_KEY, SEED_VERSION);
+  } catch {
+    // version stamp is best-effort
+  }
   return normalizedDefault;
 };
 
 export const saveMaster = (master) => {
   localStorage.setItem(MASTER_KEY, JSON.stringify(master));
+  // Stamp the current seed so user edits made after a re-seed are kept on the
+  // next read rather than being overwritten by the factory defaults.
+  try {
+    localStorage.setItem(SEED_VERSION_KEY, SEED_VERSION);
+  } catch {
+    // best-effort
+  }
 };
 
 export const resetMaster = () => {
   localStorage.removeItem(MASTER_KEY);
+  try {
+    localStorage.removeItem(SEED_VERSION_KEY);
+  } catch {
+    // best-effort
+  }
 };
 
 export const getPresets = () => getMaster();

@@ -1195,16 +1195,9 @@ const ItemFormModal = ({
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <Label className="mb-0">Materials & Specifications</Label>
-                {rateBuildupMode ? (
-                  <button
-                    type="button"
-                    onClick={() => setBuildupOpen(true)}
-                    className="flex items-center gap-1 text-[11px] font-semibold text-select-blue hover:text-primary cursor-pointer"
-                    title="Materials are mapped from the rate build-up"
-                  >
-                    <Calculator size={11} /> Edit Rate Build-up
-                  </button>
-                ) : (
+                {/* In rate-build-up mode the single "Edit Rate Build-up" button
+                    lives in the Rate section above — no duplicate here. */}
+                {!rateBuildupMode && (
                   <div className="flex items-center gap-2">
                     <button
                       type="button"

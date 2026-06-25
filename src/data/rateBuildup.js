@@ -130,10 +130,45 @@ export const recipeToMaterials = (recipe, materialLookup = {}) =>
     };
   });
 
+const AREA_UNITS = new Set(["sqft", "sqm"]);
+const LENGTH_UNITS = new Set(["rmt", "rft", "mm"]);
+const COUNT_UNITS = new Set(["nos", "set", "pair", "lot", "ls"]);
+
+// Typical fit-out wastage by material type — gives a seeded build-up realistic
+// Waste% values instead of a flat 0. Tunable per project afterwards.
+const defaultWastageFor = (name = "") => {
+  const n = name.toLowerCase();
+  if (/(putty|paint|primer|polish|adhesive|cement|mortar)/.test(n)) return 10;
+  if (/(glass|mirror)/.test(n)) return 12;
+  if (/(ply|plywood|board|laminate|veneer|mdf|hdf|wpc|gypsum)/.test(n)) return 8;
+  if (/(granite|marble|stone|quartz|tile)/.test(n)) return 7;
+  if (/(upholstery|foam|fabric)/.test(n)) return 6;
+  if (/(led|light|wire|cable)/.test(n)) return 4;
+  if (/(hardware|hinge|channel|handle|fitting|screw|fastener)/.test(n)) return 2;
+  return 5;
+};
+
+// Assumed consumption of a material per 1 unit of the work. Same-unit materials
+// (e.g. sqft board for a sqft ceiling) are ~1; count/length items consumed by an
+// area/length work are a small fraction so the seeded rate stays sane.
+const defaultQtyFor = (matUnit = "", workUnit = "") => {
+  if (!matUnit || !workUnit || matUnit === workUnit) return 1;
+  if (COUNT_UNITS.has(matUnit) && !COUNT_UNITS.has(workUnit)) return 0.1;
+  if (LENGTH_UNITS.has(matUnit) && AREA_UNITS.has(workUnit)) return 0.4;
+  if (AREA_UNITS.has(matUnit) && LENGTH_UNITS.has(workUnit)) return 2;
+  return 1;
+};
+
 // Seed a recipe from a work's existing free-text materials ({name, spec}) by
 // matching each name to a Material Master entry — gives a starting point instead
 // of a blank build-up. Unmatched names become components with a 0 cached rate.
-export const seedRecipeFromMaterials = (workMaterials = [], materials = []) => {
+// `workUnit` lets the seed pick realistic per-unit quantities for materials
+// measured in a different unit than the work.
+export const seedRecipeFromMaterials = (
+  workMaterials = [],
+  materials = [],
+  workUnit = "",
+) => {
   const findMat = (name) => {
     const n = (name || "").trim().toLowerCase();
     if (!n) return undefined;
@@ -149,13 +184,16 @@ export const seedRecipeFromMaterials = (workMaterials = [], materials = []) => {
     ...blankRecipe(),
     components: workMaterials.map((wm) => {
       const mat = findMat(wm.name);
+      const name = mat?.name || wm.name || "";
+      const unit = mat?.unit || "";
       return {
         ...blankComponent(),
         materialId: mat?.id || "",
-        name: mat?.name || wm.name || "",
-        unit: mat?.unit || "",
+        name,
+        unit,
         rate: mat ? Number(mat.rate) || 0 : 0,
-        qty: 1,
+        qty: defaultQtyFor(unit, workUnit),
+        wastagePct: defaultWastageFor(name),
       };
     }),
   };

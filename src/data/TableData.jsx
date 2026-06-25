@@ -2,13 +2,24 @@ import React from "react";
 
 // ── Leads seed ────────────────────────────────────────────────────────────────
 // Demo pipeline for Digital Atelier. Indian context, current cycle (2026).
-// Each lead carries the fields the proposal flow needs so downstream modules
-// resolve cleanly:
-//   • serviceTrack  — "Interiors" (BHK/Villa presets) or "Architecture"
-//   • location      — property-type label shown on the lead
-//   • quotePreset   — one of 1BHK / 2BHK / 3BHK / Villa (blank for Architecture)
-//   • quoteGrade    — economy / premium / luxury
-//   • quoteSizeRange— matches the preset's size band
+// Records conform to the CURRENT two-track scope (see docs/architecture-track-spec.md):
+//   • serviceTrack   — "Interiors" or "Architecture" (the one field the system branches on)
+//   • inquirySource  — where the lead came from (always captured)
+//
+// Interiors leads carry the package-preset fields the proposal flow needs:
+//   • quotePreset    — 1BHK / 2BHK / 3BHK / Villa
+//   • propertyType   — the specific property under that preset
+//   • quoteGrade     — economy / premium / luxury  (read by the Send-Proposal modal)
+//   • quoteSizeRange — matches the preset's size band
+//   • investment     — packaged budget band  ·  possessionDate — DD.MM.YYYY
+//
+// Architecture leads have NO package quote. They carry the track-aware intake fields
+// (build-from-land), and pricing follows feasibility, not a preset:
+//   • projectIntent  — Residential Building / Commercial / Mixed-use / …
+//   • plotArea, plotNumber, landOwnership
+//   • targetCompletion (indicative)  ·  indicativeBudget (range, not a package quote)
+//   `investment` mirrors `indicativeBudget` so the Investment card still renders.
+//
 // "Won" leads link to a client record via convertedClientID (see
 // ClientTableData.jsx, where the same pairing carries sourceLeadId back).
 export const TableData = [
@@ -26,6 +37,7 @@ export const TableData = [
     investment: "₹12L-18L",
     possessionDate: "15.03.2027",
     serviceTrack: "Interiors",
+    inquirySource: "Website",
     propertyType: "Apartment",
     quotePreset: "2BHK",
     quoteGrade: "premium",
@@ -44,28 +56,32 @@ export const TableData = [
     investment: "₹6L-9L",
     possessionDate: "10.02.2027",
     serviceTrack: "Interiors",
+    inquirySource: "Social Media",
     propertyType: "Studio Apartment",
     quotePreset: "1BHK",
     quoteGrade: "economy",
     quoteSizeRange: "450-600",
   },
   {
+    // Architecture inquiry — track-aware fields, no package quote.
     sno: 3,
     proposalId: "LD-2026-003",
     clientName: "Rohan Kapoor",
     phone: "98450 77231",
     email: "rohan.kapoor@gmail.com",
-    scope: "Architecture",
+    scope: "Residential Building",
     location: "Residential Building",
     locationSecondary: "Whitefield, Bengaluru",
     status: "Inquiry",
-    investment: "₹1.5Cr-2Cr",
-    possessionDate: "20.12.2027",
+    investment: "₹1.8Cr – ₹2.2Cr",
     serviceTrack: "Architecture",
-    propertyType: "",
-    quotePreset: "",
-    quoteGrade: "premium",
-    quoteSizeRange: "",
+    inquirySource: "Website",
+    projectIntent: "Residential Building",
+    plotArea: "3600 sqft",
+    plotNumber: "78/2C",
+    landOwnership: "Owned",
+    targetCompletion: "20.12.2027",
+    indicativeBudget: "₹1.8Cr – ₹2.2Cr",
   },
   // ── Qualified ────────────────────────────────────────────────────────────────
   {
@@ -81,6 +97,7 @@ export const TableData = [
     investment: "₹20L-30L",
     possessionDate: "05.04.2027",
     serviceTrack: "Interiors",
+    inquirySource: "Referral",
     propertyType: "Penthouse",
     quotePreset: "3BHK",
     quoteGrade: "luxury",
@@ -99,28 +116,32 @@ export const TableData = [
     investment: "₹12L-18L",
     possessionDate: "18.03.2027",
     serviceTrack: "Interiors",
+    inquirySource: "Walk-in",
     propertyType: "Apartment",
     quotePreset: "2BHK",
     quoteGrade: "premium",
     quoteSizeRange: "800-1100",
   },
   {
+    // Architecture qualified — commercial build, due-diligence underway.
     sno: 6,
     proposalId: "LD-2026-006",
     clientName: "Ishaan Nair",
     phone: "98847 10934",
     email: "ishaan.nair@gmail.com",
-    scope: "Architecture",
+    scope: "Commercial",
     location: "Commercial",
     locationSecondary: "OMR, Chennai",
     status: "Qualified",
-    investment: "₹3Cr-4Cr",
-    possessionDate: "30.06.2028",
+    investment: "₹3.2Cr – ₹4Cr",
     serviceTrack: "Architecture",
-    propertyType: "",
-    quotePreset: "",
-    quoteGrade: "premium",
-    quoteSizeRange: "",
+    inquirySource: "Referral",
+    projectIntent: "Commercial",
+    plotArea: "0.5 acre",
+    plotNumber: "142/3B",
+    landOwnership: "Under purchase",
+    targetCompletion: "30.06.2028",
+    indicativeBudget: "₹3.2Cr – ₹4Cr",
   },
   // ── Proposal sent ────────────────────────────────────────────────────────────
   {
@@ -136,6 +157,7 @@ export const TableData = [
     investment: "₹20L-30L",
     possessionDate: "12.05.2027",
     serviceTrack: "Interiors",
+    inquirySource: "Website",
     propertyType: "Duplex",
     quotePreset: "3BHK",
     quoteGrade: "premium",
@@ -154,6 +176,7 @@ export const TableData = [
     investment: "₹12L-18L",
     possessionDate: "22.04.2027",
     serviceTrack: "Interiors",
+    inquirySource: "Social Media",
     propertyType: "Apartment",
     quotePreset: "2BHK",
     quoteGrade: "economy",
@@ -172,6 +195,7 @@ export const TableData = [
     investment: "₹60L-75L",
     possessionDate: "15.08.2027",
     serviceTrack: "Interiors",
+    inquirySource: "Referral",
     propertyType: "Luxury Villa",
     quotePreset: "Villa",
     quoteGrade: "luxury",
@@ -190,6 +214,7 @@ export const TableData = [
     investment: "₹6L-9L",
     possessionDate: "28.02.2027",
     serviceTrack: "Interiors",
+    inquirySource: "Cold Call",
     propertyType: "Apartment",
     quotePreset: "1BHK",
     quoteGrade: "economy",
@@ -208,6 +233,7 @@ export const TableData = [
     investment: "₹30L-40L",
     possessionDate: "10.09.2027",
     serviceTrack: "Interiors",
+    inquirySource: "Website",
     propertyType: "Penthouse",
     quotePreset: "3BHK",
     quoteGrade: "luxury",
@@ -226,6 +252,7 @@ export const TableData = [
     investment: "₹45L-55L",
     possessionDate: "05.07.2027",
     serviceTrack: "Interiors",
+    inquirySource: "Referral",
     propertyType: "Independent House",
     quotePreset: "Villa",
     quoteGrade: "premium",
@@ -245,6 +272,7 @@ export const TableData = [
     investment: "₹12L-18L",
     possessionDate: "18.06.2027",
     serviceTrack: "Interiors",
+    inquirySource: "Social Media",
     propertyType: "Apartment",
     quotePreset: "2BHK",
     quoteGrade: "premium",
@@ -263,6 +291,7 @@ export const TableData = [
     investment: "₹20L-30L",
     possessionDate: "25.05.2027",
     serviceTrack: "Interiors",
+    inquirySource: "Website",
     propertyType: "Duplex",
     quotePreset: "3BHK",
     quoteGrade: "premium",
@@ -281,6 +310,7 @@ export const TableData = [
     investment: "₹70L-85L",
     possessionDate: "12.10.2027",
     serviceTrack: "Interiors",
+    inquirySource: "Referral",
     propertyType: "Farm House",
     quotePreset: "Villa",
     quoteGrade: "luxury",
@@ -300,6 +330,7 @@ export const TableData = [
     investment: "₹12L-18L",
     possessionDate: "15.11.2027",
     serviceTrack: "Interiors",
+    inquirySource: "Cold Call",
     propertyType: "Apartment",
     quotePreset: "2BHK",
     quoteGrade: "economy",
@@ -318,6 +349,7 @@ export const TableData = [
     investment: "₹50L-65L",
     possessionDate: "20.01.2028",
     serviceTrack: "Interiors",
+    inquirySource: "Walk-in",
     propertyType: "Beach House",
     quotePreset: "Villa",
     quoteGrade: "premium",
@@ -337,6 +369,7 @@ export const TableData = [
     investment: "₹12L-18L",
     possessionDate: "30.04.2027",
     serviceTrack: "Interiors",
+    inquirySource: "Website",
     propertyType: "Apartment",
     quotePreset: "2BHK",
     quoteGrade: "premium",
@@ -356,6 +389,7 @@ export const TableData = [
     investment: "₹30L-40L",
     possessionDate: "15.06.2027",
     serviceTrack: "Interiors",
+    inquirySource: "Referral",
     propertyType: "Penthouse",
     quotePreset: "3BHK",
     quoteGrade: "luxury",
@@ -375,6 +409,7 @@ export const TableData = [
     investment: "₹65L-80L",
     possessionDate: "20.09.2027",
     serviceTrack: "Interiors",
+    inquirySource: "Social Media",
     propertyType: "Luxury Villa",
     quotePreset: "Villa",
     quoteGrade: "luxury",
@@ -394,6 +429,7 @@ export const TableData = [
     investment: "₹6L-9L",
     possessionDate: "10.03.2027",
     serviceTrack: "Interiors",
+    inquirySource: "Website",
     propertyType: "Apartment",
     quotePreset: "1BHK",
     quoteGrade: "economy",
@@ -401,22 +437,27 @@ export const TableData = [
     convertedClientID: "BL-2026-004",
   },
   {
+    // Architecture Won → converted to client BL-2026-005.
+    // Contract value at appointment is the staged DESIGN FEE, not the
+    // construction cost — see the client record's projectValue.
     sno: 22,
     proposalId: "LD-2026-022",
     clientName: "Advait Kulkarni",
     phone: "98225 60079",
     email: "advait.kulkarni@gmail.com",
-    scope: "Architecture",
+    scope: "Residential Building",
     location: "Residential Building",
     locationSecondary: "Kothrud, Pune",
     status: "Won",
-    investment: "₹2Cr-2.5Cr",
-    possessionDate: "30.11.2028",
+    investment: "₹2Cr – ₹2.5Cr",
     serviceTrack: "Architecture",
-    propertyType: "",
-    quotePreset: "",
-    quoteGrade: "premium",
-    quoteSizeRange: "",
+    inquirySource: "Referral",
+    projectIntent: "Residential Building",
+    plotArea: "4800 sqft",
+    plotNumber: "56/1A",
+    landOwnership: "Owned",
+    targetCompletion: "30.11.2028",
+    indicativeBudget: "₹2Cr – ₹2.5Cr",
     convertedClientID: "BL-2026-005",
   },
   // ── Lost ─────────────────────────────────────────────────────────────────────
@@ -434,6 +475,7 @@ export const TableData = [
     investment: "₹12L-18L",
     possessionDate: "01.05.2027",
     serviceTrack: "Interiors",
+    inquirySource: "Social Media",
     propertyType: "Apartment",
     quotePreset: "2BHK",
     quoteGrade: "premium",
@@ -453,6 +495,7 @@ export const TableData = [
     investment: "₹20L-30L",
     possessionDate: "15.04.2027",
     serviceTrack: "Interiors",
+    inquirySource: "Website",
     propertyType: "Duplex",
     quotePreset: "3BHK",
     quoteGrade: "premium",

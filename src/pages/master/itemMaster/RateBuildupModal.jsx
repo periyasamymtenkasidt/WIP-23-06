@@ -22,15 +22,17 @@ const RateBuildupModal = ({ item, onSave, onClose }) => {
 
   const [recipes, setRecipes] = useState(() => {
     if (item.recipes) return clone(item.recipes);
-    const seeded = seedRecipeFromMaterials(item.materials || [], materials);
+    const seeded = seedRecipeFromMaterials(item.materials || [], materials, item.unit || "");
     return {
       economy: { ...clone(seeded), overheadPct: 5, marginPct: 10 },
       premium: { ...clone(seeded), overheadPct: 10, marginPct: 20 },
       luxury: { ...clone(seeded), overheadPct: 15, marginPct: 30 },
     };
   });
-  const [activeGrade, setActiveGrade] = useState(item.defaultGrade || "premium");
-  const [defaultGrade, setDefaultGrade] = useState(item.defaultGrade || "premium");
+  // The active grade tab is the single, final selection — it both drives the
+  // recipe being edited AND becomes the item's default grade (which sets the
+  // saved rate). Defaults to Economy for every scope.
+  const [activeGrade, setActiveGrade] = useState(item.defaultGrade || "economy");
   const [newGradeName, setNewGradeName] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);
   const [deleteTargetKey, setDeleteTargetKey] = useState(null);
@@ -98,7 +100,6 @@ const RateBuildupModal = ({ item, onSave, onClose }) => {
       [key]: clone(active),
     }));
     setActiveGrade(key);
-    setDefaultGrade(key);
   };
 
   const handleRemoveGrade = (key, e) => {
@@ -125,9 +126,6 @@ const RateBuildupModal = ({ item, onSave, onClose }) => {
 
     if (activeGrade === key) {
       setActiveGrade(nextActive);
-    }
-    if (defaultGrade === key) {
-      setDefaultGrade(nextActive);
     }
     setDeleteTargetKey(null);
   };
@@ -165,14 +163,11 @@ const RateBuildupModal = ({ item, onSave, onClose }) => {
     if (activeGrade === oldKey) {
       setActiveGrade(newKey);
     }
-    if (defaultGrade === oldKey) {
-      setDefaultGrade(newKey);
-    }
     setEditTargetKey(null);
   };
 
   const save = () => {
-    const defaultRecipe = recipes[defaultGrade] || blankRecipe();
+    const defaultRecipe = recipes[activeGrade] || blankRecipe();
     const mappedMaterials = (defaultRecipe.components || []).map((c) => {
       const mat = matById[c.materialId];
       const factor = (Number(c.qty) || 0) * (1 + (Number(c.wastagePct) || 0) / 100);
@@ -188,8 +183,8 @@ const RateBuildupModal = ({ item, onSave, onClose }) => {
     onSave({
       ...item,
       recipes,
-      defaultGrade,
-      rate: Math.round(allRates[defaultGrade] || 0),
+      defaultGrade: activeGrade,
+      rate: Math.round(allRates[activeGrade] || 0),
       materials: mappedMaterials,
     });
   };
@@ -296,12 +291,12 @@ const RateBuildupModal = ({ item, onSave, onClose }) => {
         <div className="px-6 py-4 overflow-y-auto space-y-4">
           {/* Components */}
           <div className="rounded-xl border border-bordergray overflow-hidden">
-            <div className="grid grid-cols-[1.7fr_0.7fr_0.6fr_0.8fr_0.9fr_28px] gap-2 px-3 py-2 bg-bg-soft/60 text-[10px] font-bold uppercase tracking-wider text-text-subtle">
-              <span>Material (from Master)</span>
-              <span className="text-center">Qty/{workUnit}</span>
-              <span className="text-center">Waste%</span>
-              <span className="text-right">Rate</span>
-              <span className="text-right">Amount</span>
+            <div className="grid grid-cols-[2.4fr_1.1fr_1fr_0.8fr_0.7fr_28px] gap-2 px-3 py-2 bg-bg-soft/60 text-[10px] font-bold uppercase tracking-wider text-text-subtle items-center">
+              <span className="min-w-0 pl-2 truncate">Material (from Master)</span>
+              <span className="min-w-0 text-center truncate">Qty/{workUnit}</span>
+              <span className="min-w-0 text-center truncate">Waste%</span>
+              <span className="min-w-0 text-right truncate">Rate</span>
+              <span className="min-w-0 text-right truncate">Amount</span>
               <span></span>
             </div>
             {active.components.length === 0 ? (
@@ -312,12 +307,12 @@ const RateBuildupModal = ({ item, onSave, onClose }) => {
               calc.lines.map((line, i) => (
                 <div
                   key={i}
-                  className="grid grid-cols-[1.7fr_0.7fr_0.6fr_0.8fr_0.9fr_28px] gap-2 px-3 py-2 border-t border-bordergray items-center text-[12px]"
+                  className="grid grid-cols-[2.4fr_1.1fr_1fr_0.8fr_0.7fr_28px] gap-2 px-3 py-2 border-t border-bordergray items-center text-[12px]"
                 >
                   <select
                     value={active.components[i].materialId}
                     onChange={(e) => pickMaterial(i, e.target.value)}
-                    className={`border rounded-lg px-2 py-1.5 text-[12px] bg-white ${line.missing ? "border-red-300" : "border-bordergray"}`}
+                    className={`w-full min-w-0 border rounded-lg px-2 py-1.5 text-[12px] bg-white ${line.missing ? "border-red-300" : "border-bordergray"}`}
                   >
                     <option value="">Select material…</option>
                     {materials.map((m) => (
@@ -330,19 +325,19 @@ const RateBuildupModal = ({ item, onSave, onClose }) => {
                     type="number"
                     value={active.components[i].qty}
                     onChange={(e) => patchComp(i, { qty: e.target.value })}
-                    className="border border-bordergray rounded-lg px-2 py-1.5 text-center"
+                    className="w-full min-w-0 border border-bordergray rounded-lg px-2 py-1.5 text-center"
                   />
                   <input
                     type="number"
                     value={active.components[i].wastagePct}
                     onChange={(e) => patchComp(i, { wastagePct: e.target.value })}
-                    className="border border-bordergray rounded-lg px-2 py-1.5 text-center"
+                    className="w-full min-w-0 border border-bordergray rounded-lg px-2 py-1.5 text-center"
                   />
-                  <span className="text-right text-text-muted tabular-nums">
+                  <span className="min-w-0 text-right text-text-muted tabular-nums truncate">
                     {inr(line.rate)}
                     <span className="text-text-subtle">/{line.unit}</span>
                   </span>
-                  <span className="text-right font-semibold text-textcolor tabular-nums">
+                  <span className="min-w-0 text-right font-semibold text-textcolor tabular-nums">
                     {inr(line.amount)}
                   </span>
                   <button
@@ -419,28 +414,6 @@ const RateBuildupModal = ({ item, onSave, onClose }) => {
               client is billed output GST (18%) on the work value separately.
             </p>
           </div>
-
-          {/* Default grade selector */}
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-text-subtle">
-              Default grade (sets the item's rate)
-            </span>
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {dynamicGrades.map((g) => (
-                <button
-                  key={g.key}
-                  onClick={() => setDefaultGrade(g.key)}
-                  className={`px-3 py-1.5 rounded-lg text-[12px] font-semibold border cursor-pointer ${
-                    defaultGrade === g.key
-                      ? "bg-select-blue text-white border-select-blue"
-                      : "bg-white text-text-muted border-bordergray hover:bg-bg-soft"
-                  }`}
-                >
-                  {g.label} · {inr(allRates[g.key])}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
 
         {/* Footer */}
@@ -448,9 +421,9 @@ const RateBuildupModal = ({ item, onSave, onClose }) => {
           <span className="text-[12px] text-text-muted">
             Item rate →{" "}
             <span className="font-bold text-textcolor">
-              {inr(allRates[defaultGrade])}/{workUnit}
+              {inr(allRates[activeGrade])}/{workUnit}
             </span>{" "}
-            ({dynamicGrades.find((g) => g.key === defaultGrade)?.label || defaultGrade})
+            ({dynamicGrades.find((g) => g.key === activeGrade)?.label || activeGrade})
           </span>
           <div className="flex gap-2">
             <button

@@ -1364,15 +1364,20 @@ const QuoteModal = ({
   };
 
   // Live Preview only: tag each scope item's name with its quality grade in
-  // shorthand brackets, e.g. "False Ceiling (Lu)". This is preview-only — the
-  // sent/printed quote (which builds its own quote object) is unaffected, and
-  // QuotePreview stays untouched (shared with the sample quote).
+  // shorthand brackets — two letters from each word (up to three words),
+  // uppercased: "Luxury" → "(LU)", "Ultra Premium" → "(ULPR)". This is
+  // preview-only — the sent/printed quote (which builds its own quote object)
+  // is unaffected, and QuotePreview stays untouched (shared with the sample
+  // quote).
   const gradeShorthand = (key) => {
     const label = gradeOptions.find((g) => g.key === key)?.label || key || "";
     if (!label) return "";
-    return (
-      label.charAt(0).toUpperCase() + (label.charAt(1) || "").toLowerCase()
-    );
+    return label
+      .trim()
+      .split(/\s+/)
+      .slice(0, 3)
+      .map((word) => word.slice(0, 2).toUpperCase())
+      .join("");
   };
   const previewQuote = (() => {
     const base = buildQuote();

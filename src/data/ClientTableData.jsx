@@ -1,11 +1,17 @@
 import React from "react";
 
 // ── Clients seed ──────────────────────────────────────────────────────────────
-// Indian context, current cycle (2026). The first five records are the clients
-// created when the matching "Won" leads were converted — they carry
-// `sourceLeadId` back to TableData.jsx (the lead there holds convertedClientID),
-// plus a numeric `projectValue` used by Deals/Projects milestone math. The
-// remaining records are standalone clients onboarded earlier.
+// Indian context, current cycle (2026). Records conform to the CURRENT two-track
+// scope (Interiors / Architecture).
+//
+// The first five records are the clients created when the matching "Won" leads
+// were converted — they carry `sourceLeadId` back to TableData.jsx (the lead there
+// holds convertedClientID), plus a numeric `projectValue` used by Deals/Projects
+// milestone math. The remaining records are standalone clients onboarded earlier.
+//
+// `serviceTrack` mirrors the source lead's track. For the Architecture client the
+// contract value is the staged DESIGN FEE (the firm's fee), NOT the contractor's
+// construction cost — interiors clients store the full execution value instead.
 export const ClientTableData = [
   // ── Converted from Won leads ─────────────────────────────────────────────────
   {
@@ -14,6 +20,7 @@ export const ClientTableData = [
     clientName: "Vihaan Verma",
     clientPhone: "98140 55207",
     clientEmail: "vihaan.verma@gmail.com",
+    serviceTrack: "Interiors",
     location: "Apartment",
     locationSecondary: "Sector 17, Chandigarh",
     sizeRange: "800-1100",
@@ -29,6 +36,7 @@ export const ClientTableData = [
     clientName: "Sara Chopra",
     clientPhone: "97003 41128",
     clientEmail: "sara.chopra@gmail.com",
+    serviceTrack: "Interiors",
     location: "Penthouse",
     locationSecondary: "Jubilee Hills, Hyderabad",
     sizeRange: "1200-1600",
@@ -44,6 +52,7 @@ export const ClientTableData = [
     clientName: "Ayaan Sheikh",
     clientPhone: "98863 72015",
     clientEmail: "ayaan.sheikh@gmail.com",
+    serviceTrack: "Interiors",
     location: "Luxury Villa",
     locationSecondary: "Sarjapur, Bengaluru",
     sizeRange: "2400+",
@@ -59,6 +68,7 @@ export const ClientTableData = [
     clientName: "Ira Krishnan",
     clientPhone: "90250 88431",
     clientEmail: "ira.krishnan@gmail.com",
+    serviceTrack: "Interiors",
     location: "Apartment",
     locationSecondary: "Adyar, Chennai",
     sizeRange: "450-600",
@@ -69,16 +79,19 @@ export const ClientTableData = [
     sourceLeadId: "LD-2026-021",
   },
   {
+    // Architecture client — projectValue is the staged DESIGN FEE (~10% of the
+    // ₹2-2.5Cr construction budget), not the construction cost itself.
     sno: 5,
     clientID: "BL-2026-005",
     clientName: "Advait Kulkarni",
     clientPhone: "98225 60079",
     clientEmail: "advait.kulkarni@gmail.com",
+    serviceTrack: "Architecture",
     location: "Residential Building",
     locationSecondary: "Kothrud, Pune",
     sizeRange: "",
-    budget: "₹2.2Cr",
-    projectValue: 22000000,
+    budget: "₹22L",
+    projectValue: 2200000,
     paymentStatus: "completed",
     joinDate: "02.06.2026",
     sourceLeadId: "LD-2026-022",
@@ -90,6 +103,7 @@ export const ClientTableData = [
     clientName: "Meera Nambiar",
     clientPhone: "98677 22014",
     clientEmail: "meera.nambiar@gmail.com",
+    serviceTrack: "Interiors",
     location: "Penthouse",
     locationSecondary: "Lower Parel, Mumbai",
     sizeRange: "1200-1600",
@@ -104,6 +118,7 @@ export const ClientTableData = [
     clientName: "Kabir Anand",
     clientPhone: "99001 47783",
     clientEmail: "kabir.anand@gmail.com",
+    serviceTrack: "Interiors",
     location: "Apartment",
     locationSecondary: "HSR Layout, Bengaluru",
     sizeRange: "800-1100",
@@ -118,6 +133,7 @@ export const ClientTableData = [
     clientName: "Riya Sharma",
     clientPhone: "97309 65520",
     clientEmail: "riya.sharma@gmail.com",
+    serviceTrack: "Interiors",
     location: "Duplex",
     locationSecondary: "Kalyani Nagar, Pune",
     sizeRange: "1200-1600",
@@ -132,6 +148,7 @@ export const ClientTableData = [
     clientName: "Aryan Malhotra",
     clientPhone: "98113 80496",
     clientEmail: "aryan.malhotra@gmail.com",
+    serviceTrack: "Interiors",
     location: "Luxury Villa",
     locationSecondary: "DLF Phase 2, Gurugram",
     sizeRange: "2400+",
@@ -146,6 +163,7 @@ export const ClientTableData = [
     clientName: "Nisha Reddy",
     clientPhone: "90030 21765",
     clientEmail: "nisha.reddy@gmail.com",
+    serviceTrack: "Interiors",
     location: "Apartment",
     locationSecondary: "Kondapur, Hyderabad",
     sizeRange: "800-1100",
@@ -160,6 +178,7 @@ export const ClientTableData = [
     clientName: "Karan Bhatt",
     clientPhone: "98256 70138",
     clientEmail: "karan.bhatt@gmail.com",
+    serviceTrack: "Interiors",
     location: "Independent House",
     locationSecondary: "Bodakdev, Ahmedabad",
     sizeRange: "2400+",
@@ -174,6 +193,7 @@ export const ClientTableData = [
     clientName: "Pooja Iyer",
     clientPhone: "90470 33982",
     clientEmail: "pooja.iyer@gmail.com",
+    serviceTrack: "Interiors",
     location: "Studio Apartment",
     locationSecondary: "T. Nagar, Chennai",
     sizeRange: "450-600",

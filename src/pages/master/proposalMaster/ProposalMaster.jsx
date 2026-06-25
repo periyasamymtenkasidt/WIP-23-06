@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import {
   Plus,
   Trash2,
-  RotateCcw,
   Save,
   Check,
   X,
@@ -30,7 +29,6 @@ import {
   DoorOpen,
   BookOpen,
   Building2,
-  Command,
   BarChart3,
   Wallet,
   AlertTriangle,
@@ -44,7 +42,6 @@ import {
   saveMaster,
   computeTotals,
   GST_RATE,
-  DEFAULT_PRESETS,
 } from "../../../data/QuotePresets";
 import { formatAmount } from "../../../utils/formatAmount";
 import {
@@ -374,7 +371,6 @@ const getCategory = (area) => {
 
 const ProposalMaster = () => {
   const [master, setMaster] = useState(() => getMaster());
-  const [hasChanges, setHasChanges] = useState(false);
   const [isInitial, setIsInitial] = useState(true);
   const [activeKey, setActiveKey] = useState(() => {
     const keys = Object.keys(getMaster());
@@ -547,13 +543,18 @@ const ProposalMaster = () => {
     availableGrades[0]?.key ||
     "economy";
 
+  // Auto-save: persist every change to the master immediately, then briefly
+  // flash a "Saved" indicator. No manual save step.
   useEffect(() => {
     if (isInitial) {
       setIsInitial(false);
       return;
     }
     saveMaster(master);
-    setHasChanges(true);
+    setSavedFlash(true);
+    const t = setTimeout(() => setSavedFlash(false), 1500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [master]);
 
   const showToast = (message, type = "success") => {
@@ -1044,22 +1045,8 @@ const ProposalMaster = () => {
     });
   };
 
-  const handleReset = () => {
-    askConfirm({
-      title: "Reset all presets?",
-      message:
-        "All your custom presets will be replaced with the factory defaults. Custom edits will be lost.",
-      confirmLabel: "Reset to defaults",
-      danger: true,
-      onConfirm: () => {
-        setMaster(DEFAULT_PRESETS);
-        setActiveKey(Object.keys(DEFAULT_PRESETS)[0]);
-        setHasChanges(true);
-        showToast("Reset to factory defaults (unsaved changes)", "success");
-      },
-    });
-  };
-
+  // Changes auto-save (see the effect above). This runs the size-range
+  // validation on demand (Ctrl/Cmd+S) and confirms the save with a toast.
   const handleManualSave = () => {
     const currentSizeRange = activeConfig?.sizeRange || "";
     const err = validateSizeRangeInput(currentSizeRange);
@@ -1069,10 +1056,9 @@ const ProposalMaster = () => {
       return;
     }
     saveMaster(master);
-    setHasChanges(false);
     setSavedFlash(true);
     setTimeout(() => setSavedFlash(false), 1500);
-    showToast("All changes saved successfully", "success");
+    showToast("All changes saved", "success");
   };
 
   const toggleExpanded = (idx) => {
@@ -1241,30 +1227,17 @@ const ProposalMaster = () => {
               <Keyboard size={12} />
             </button>
 
-            <button
-              type="button"
-              onClick={handleReset}
-              className="flex items-center gap-1.5 px-3 py-2 bg-white border border-bordergray cursor-pointer rounded-lg text-[12px] font-semibold text-textcolor hover:bg-bg-soft hover:border-text-subtle transition-all"
-            >
-              <RotateCcw size={13} /> Reset
-            </button>
-            <button
-              type="button"
-              onClick={handleManualSave}
-              className={`flex items-center gap-1.5 px-4 py-2 cursor-pointer rounded-lg text-[12px] font-semibold transition-all shadow-md ${
+            <div
+              title="Changes are saved automatically"
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-[12px] font-semibold border transition-all ${
                 savedFlash
-                  ? "bg-emerald-500 text-white shadow-emerald-500/20"
-                  : "bg-linear-to-br from-select-blue to-primary text-white hover:shadow-select-blue/30 hover:scale-[1.02]"
-              } ${hasChanges && !savedFlash ? "animate-pulse ring-2 ring-select-blue/20" : ""}`}
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                  : "bg-bg-soft text-text-muted border-bordergray"
+              }`}
             >
               {savedFlash ? <Check size={13} /> : <Save size={13} />}
-              {savedFlash ? "Saved" : "Save Changes"}
-              {!savedFlash && (
-                <kbd className="hidden sm:inline-flex items-center gap-0.5 text-[9px] font-semibold bg-white/15 px-1.5 py-0.5 rounded ml-1">
-                  <Command size={9} /> S
-                </kbd>
-              )}
-            </button>
+              {savedFlash ? "Saved" : "Auto-saved"}
+            </div>
           </div>
         </div>
 

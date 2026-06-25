@@ -790,6 +790,27 @@ const QuoteModal = ({
     );
   }, [formData.scopeItems, gradeOptions]);
 
+  // Auto-map: if a scope is sitting on a grade with no value (₹0 / no build-up)
+  // but another grade DOES carry a value, move it onto the first grade that
+  // does — so the proposal shows a grade that has data and the scope's values
+  // (rate, materials, amount) reflect it. Scopes whose linked item has no grade
+  // data at all are left untouched (they keep their static values).
+  useEffect(() => {
+    const library = listLibrary();
+    const materialLookup = materialsById(listMaterials());
+    let changed = false;
+    const next = (formData.scopeItems || []).map((item) => {
+      const valueGrades = gradeOptions
+        .filter((g) => gradeHasValue(item, g.key, { library, materialLookup }))
+        .map((g) => g.key);
+      if (valueGrades.length === 0) return item;
+      if (valueGrades.includes(item.grade)) return item;
+      changed = true;
+      return mapScopeItemToGrade(item, valueGrades[0]);
+    });
+    if (changed) setFormData((prev) => ({ ...prev, scopeItems: next }));
+  }, [formData.scopeItems, gradeOptions]);
+
   // Grade is chosen per scope item: re-map only the targeted row to the new
   // grade (rate, materials & amount), leaving every other row untouched.
   const handleScopeGradeChange = (idx, grade) => {
@@ -1812,18 +1833,26 @@ const QuoteModal = ({
                                   </span>
                                 )}
                                 {(() => {
-                                  // Only offer grades that carry a value for this
-                                  // row; keep the currently-selected grade visible
-                                  // so the control never shows blank.
+                                  // Prefer grades that carry a non-zero (> ₹0)
+                                  // value for THIS scope item. When none has a
+                                  // rate build-up, fall back to ALL available
+                                  // grades so the dropdown is always visible.
                                   const valueGrades =
                                     gradeKeysByIdx[idx] || new Set();
-                                  const current = item.grade || "premium";
-                                  const rowGrades = gradeOptions.filter(
-                                    (g) =>
-                                      valueGrades.has(g.key) ||
-                                      g.key === current,
+                                  const filteredGrades = gradeOptions.filter(
+                                    (g) => valueGrades.has(g.key),
                                   );
+                                  const rowGrades =
+                                    filteredGrades.length > 0
+                                      ? filteredGrades
+                                      : gradeOptions;
                                   if (rowGrades.length === 0) return null;
+                                  // Keep the control on a grade that actually
+                                  // has a value when possible; otherwise use the
+                                  // item's own grade or the first available.
+                                  const current = valueGrades.has(item.grade)
+                                    ? item.grade
+                                    : item.grade || rowGrades[0].key;
                                   return (
                                     <label className="flex items-center gap-1 ml-auto">
                                       <span className="text-text-subtle">

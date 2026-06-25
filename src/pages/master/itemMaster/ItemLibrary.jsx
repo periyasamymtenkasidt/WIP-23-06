@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import {
   BookOpen,
   Plus,
@@ -11,7 +11,6 @@ import {
   IndianRupee,
   AlertTriangle,
   Info,
-  RotateCcw,
   CheckCircle2,
   Clock,
   Calculator,
@@ -19,7 +18,6 @@ import {
 import {
   listLibrary,
   saveLibrary,
-  DEFAULT_LIBRARY,
   blankLibraryItem,
 } from "../../../data/itemLibrary";
 import { UNITS } from "../../../data/boqUnits";
@@ -29,7 +27,6 @@ import RateBuildupModal from "./RateBuildupModal";
 
 const ItemLibrary = () => {
   const [items, setItems] = useState(() => listLibrary());
-  const [hasChanges, setHasChanges] = useState(false);
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState(null);
   const [buildupItem, setBuildupItem] = useState(null);
@@ -40,6 +37,17 @@ const ItemLibrary = () => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 2400);
   };
+
+  // Auto-save: persist the library to storage on every change. Skips the very
+  // first render so the initial load isn't re-written needlessly.
+  const isFirstRender = useRef(true);
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    saveLibrary(items);
+  }, [items]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -78,7 +86,7 @@ const ItemLibrary = () => {
       setItems((prev) =>
         prev.map((it) => (it.id === item.id ? { ...it, ...item, updatedAt: new Date().toISOString() } : it))
       );
-      showToast("Item updated (unsaved changes)", "success");
+      showToast("Item updated", "success");
     } else {
       const newItem = {
         ...item,
@@ -88,9 +96,8 @@ const ItemLibrary = () => {
         updatedAt: new Date().toISOString(),
       };
       setItems((prev) => [newItem, ...prev]);
-      showToast("Item added (unsaved changes)", "success");
+      showToast("Item added", "success");
     }
-    setHasChanges(true);
     setEditing(null);
   };
 
@@ -102,32 +109,9 @@ const ItemLibrary = () => {
       danger: true,
       onConfirm: () => {
         setItems((prev) => prev.filter((it) => it.id !== item.id));
-        setHasChanges(true);
-        showToast("Item deleted (unsaved changes)", "info");
+        showToast("Item deleted", "info");
       },
     });
-  };
-
-  const handleReset = () => {
-    setConfirmDialog({
-      title: "Reset library to defaults?",
-      message: "All custom items will be removed and replaced with the factory catalog.",
-      confirmLabel: "Reset library",
-      danger: true,
-      onConfirm: () => {
-        // Clone — DEFAULT_LIBRARY is a shared module-level singleton, so the
-        // state must not hold direct references to its item objects.
-        setItems(DEFAULT_LIBRARY.map((it) => ({ ...it })));
-        setHasChanges(true);
-        showToast("Library reset to defaults (unsaved changes)", "success");
-      },
-    });
-  };
-
-  const persistChanges = () => {
-    saveLibrary(items);
-    setHasChanges(false);
-    showToast("All changes saved successfully", "success");
   };
 
   return (
@@ -150,13 +134,12 @@ const ItemLibrary = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleReset}
-              className="flex items-center gap-1.5 px-3 py-2 bg-white border border-bordergray rounded-lg text-[12px] font-semibold text-text-muted hover:bg-bg-soft hover:text-textcolor transition-all cursor-pointer"
+            <span
+              title="Changes are saved automatically"
+              className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-semibold text-text-muted bg-bg-soft border border-bordergray"
             >
-              <RotateCcw size={12} /> Reset
-            </button>
+              <CheckCircle2 size={13} /> Auto-saved
+            </span>
             <button
               type="button"
               onClick={() => setEditing(blankLibraryItem())}
@@ -164,15 +147,6 @@ const ItemLibrary = () => {
             >
               <Plus size={13} /> New Item
             </button>
-            {hasChanges && (
-              <button
-                type="button"
-                onClick={persistChanges}
-                className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[12px] font-semibold shadow-md transition-all cursor-pointer animate-pulse"
-              >
-                <CheckCircle2 size={13} strokeWidth={3} /> Save Changes
-              </button>
-            )}
           </div>
         </div>
 

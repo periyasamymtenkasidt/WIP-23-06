@@ -4,6 +4,8 @@
 
 // Schedule Master days mapping commented out — reserved for future use.
 // import { getRoomDefaultDays } from "./scheduleConfig";
+import { seedRecipeFromMaterials } from "./rateBuildup";
+import { listMaterials } from "./materialLibrary";
 
 const STORAGE_KEY = "item_library";
 
@@ -227,7 +229,24 @@ const normalizeCategory = (cat) =>
 // Normalize category, and seed a per-item `days` (schedule duration). The
 // item's own value is used directly. The Schedule Master fallback (room
 // category → default days) is commented out — reserved for future use.
-const normalizeItem = (it) => {
+// Build the three standard per-grade build-ups for a work from its materials,
+// priced against the Material Master. Each grade re-seeds fresh components (no
+// shared references) and differs only by overhead/margin so the grades carry
+// genuinely different rates.
+const seedGradeRecipes = (it, materials) => {
+  const mk = (overheadPct, marginPct) => ({
+    ...seedRecipeFromMaterials(it.materials, materials, it.unit),
+    overheadPct,
+    marginPct,
+  });
+  return {
+    economy: mk(5, 10),
+    premium: mk(10, 20),
+    luxury: mk(15, 30),
+  };
+};
+
+const normalizeItem = (it, materials = []) => {
   const category = normalizeCategory(it.category);
   // const defaultDays = getRoomDefaultDays(category);
   // const days =
@@ -255,7 +274,18 @@ const normalizeItem = (it) => {
       };
     }
   }
-  return { ...it, category, days, recipes };
+  // Seed quality-grade build-ups for any work that has materials but no recipe
+  // yet, so every scope carries Economy/Premium/Luxury values — the proposal
+  // can then price and show a grade for it. Service rows (no materials) stay
+  // recipe-less.
+  if (
+    (!recipes || Object.keys(recipes).length === 0) &&
+    (it.materials || []).length > 0
+  ) {
+    recipes = seedGradeRecipes(it, materials);
+  }
+  const defaultGrade = it.defaultGrade || "economy";
+  return { ...it, category, days, recipes, defaultGrade };
 };
 
 // ── Read / Write ──────────────────────────────────────────────────────────
@@ -264,13 +294,13 @@ export const listLibrary = () => {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed.map(normalizeItem);
+      if (Array.isArray(parsed)) return parsed.map((it) => normalizeItem(it));
     }
   } catch {
     // fall through
   }
   // First read — seed defaults so the library isn't empty.
-  const seeded = DEFAULT_LIBRARY.map(normalizeItem);
+  const seeded = DEFAULT_LIBRARY.map((it) => normalizeItem(it));
   localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
   return seeded;
 };

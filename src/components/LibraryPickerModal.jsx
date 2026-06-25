@@ -102,12 +102,12 @@ const LibraryPickerModal = ({ excludeId, onClose, onPick }) => {
                           <Clock size={9} /> {it.days}d
                         </span>
                       )}
-                      <span>GST {it.gstPercent}%</span>
                       {it.recipes && (
                         <span className="text-[8.5px] font-bold uppercase tracking-wider text-select-blue bg-active-bg px-1.5 py-0.5 rounded">
-                          {it.defaultGrade || "premium"} · built-up
+                          {it.defaultGrade || "economy"} · built-up
                         </span>
                       )}
+                      <span>GST {it.gstPercent}%</span>
                     </p>
                   </div>
                   <span className="text-[12px] font-bold text-textcolor tabular-nums shrink-0">

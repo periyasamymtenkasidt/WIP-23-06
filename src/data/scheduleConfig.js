@@ -7,16 +7,10 @@ const KEY = "scheduleConfig";
 // Bump when the default presets change shape/meaning so saved blobs migrate.
 // v2 = scope-based presets (one schedule per static Item Master scope) replacing
 // the old room/category presets.
-// v3 = each scope/task also defines the number of SHIFTS required, ALONGSIDE its
-// duration in days. The Schedule Master is the single source for shift
-// requirements — there is no separate Shift Master.
-// v4 = the shift field is now a RATE — `shiftsPerDay` (shifts worked per day on
-// the scope) — instead of a total. Total Planned Shifts is derived as
-// days × shiftsPerDay, and progress = completedShifts / totalPlanned × 100.
-// Durations, timelines and possession dates stay in DAYS (the `days` field is
-// unchanged); shiftsPerDay is an independent execution-planning dimension and
-// does NOT alter the day-based timeline.
-export const SCHEDULE_CONFIG_VERSION = 4;
+// v5 = shift planning removed — each scope carries only its duration in `days`.
+// Saved configs are migrated by dropping any legacy `shiftsPerDay` / `shifts`
+// field; durations, timelines and possession math stay in DAYS.
+export const SCHEDULE_CONFIG_VERSION = 5;
 
 export const DEFAULT_CONFIG = {
   version: SCHEDULE_CONFIG_VERSION,
@@ -30,67 +24,49 @@ export const DEFAULT_CONFIG = {
     { minDaysOverdue: 6, role: "Studio Head" },
   ],
   // Scope presets. The Schedule Master is scope-based: one schedule per static
-  // scope (work item) from the Item Master. Each scope carries TWO independent
-  // numbers:
-  //   • `days`         — default duration that auto-fills the proposal scope &
-  //                      seeds the project timeline / possession math (unchanged).
-  //   • `shiftsPerDay` — shifts worked per day on the scope. The single source
-  //                      for shift requirements (no separate Shift Master).
-  //                      Total Planned Shifts = days × shiftsPerDay; progress =
-  //                      completedShifts / totalPlanned × 100. Drives execution
-  //                      planning, team allocation & progress tracking — it does
-  //                      NOT change the day-based timeline.
+  // scope (work item) from the Item Master. Each scope carries its default
+  // `days` duration — it auto-fills the proposal scope & seeds the project
+  // timeline / possession math.
   // Kept under the `rooms` key so existing consumers stay unchanged.
   // Mirrors the static scopes in `DEFAULT_LIBRARY` (data/itemLibrary.js).
   rooms: [
-    { name: "False Ceiling — gypsum board with cove groove", days: 4, shiftsPerDay: 1 },
-    { name: "TV Unit — paneling with storage", days: 5, shiftsPerDay: 1 },
-    { name: "Accent Wall Paneling — veneer / laminate", days: 3, shiftsPerDay: 1 },
-    { name: "Cove / Profile Lighting", days: 2, shiftsPerDay: 1 },
-    { name: "Crockery Unit — glass shutters + lighting", days: 5, shiftsPerDay: 1 },
-    { name: "Modular Kitchen Base Unit", days: 6, shiftsPerDay: 2 },
-    { name: "Modular Kitchen Wall Unit", days: 5, shiftsPerDay: 2 },
-    { name: "Kitchen Counter — granite / quartz", days: 2, shiftsPerDay: 1 },
-    { name: "Wardrobe — laminate, soft-close", days: 6, shiftsPerDay: 1 },
-    { name: "Wardrobe — premium veneer finish", days: 6, shiftsPerDay: 1 },
-    { name: "Bed Back Panel — upholstered", days: 4, shiftsPerDay: 1 },
-    { name: "Dresser Unit — with mirror", days: 3, shiftsPerDay: 1 },
-    { name: "Study / Work Desk — built-in", days: 4, shiftsPerDay: 1 },
-    { name: "Shoe Rack — with bench top", days: 3, shiftsPerDay: 1 },
-    { name: "Bathroom Vanity — marine ply + counter", days: 3, shiftsPerDay: 1 },
-    { name: "Shower Glass Partition — 8mm toughened", days: 2, shiftsPerDay: 1 },
-    { name: "Foyer Console — with mirror", days: 2, shiftsPerDay: 1 },
-    { name: "Wall Mirror Panel", days: 1, shiftsPerDay: 1 },
-    { name: "Site Supervision & Project Management", days: 0, shiftsPerDay: 0 },
-    { name: "Design & 3D Visualization", days: 0, shiftsPerDay: 0 },
+    { name: "False Ceiling — gypsum board with cove groove", days: 4 },
+    { name: "TV Unit — paneling with storage", days: 5 },
+    { name: "Accent Wall Paneling — veneer / laminate", days: 3 },
+    { name: "Cove / Profile Lighting", days: 2 },
+    { name: "Crockery Unit — glass shutters + lighting", days: 5 },
+    { name: "Modular Kitchen Base Unit", days: 6 },
+    { name: "Modular Kitchen Wall Unit", days: 5 },
+    { name: "Kitchen Counter — granite / quartz", days: 2 },
+    { name: "Wardrobe — laminate, soft-close", days: 6 },
+    { name: "Wardrobe — premium veneer finish", days: 6 },
+    { name: "Bed Back Panel — upholstered", days: 4 },
+    { name: "Dresser Unit — with mirror", days: 3 },
+    { name: "Study / Work Desk — built-in", days: 4 },
+    { name: "Shoe Rack — with bench top", days: 3 },
+    { name: "Bathroom Vanity — marine ply + counter", days: 3 },
+    { name: "Shower Glass Partition — 8mm toughened", days: 2 },
+    { name: "Foyer Console — with mirror", days: 2 },
+    { name: "Wall Mirror Panel", days: 1 },
+    { name: "Site Supervision & Project Management", days: 0 },
+    { name: "Design & 3D Visualization", days: 0 },
   ],
   // Task status options.
   statuses: ["Not Started", "In Progress", "Done", "Blocked"],
 };
 
-// Default shifts/day configured for a scope name in DEFAULT_CONFIG, or "" if
-// unknown. Used by the migration to backfill `shiftsPerDay` onto older configs.
-function defaultShiftsPerDayFor(name) {
-  const clean = (name || "").trim().toUpperCase();
-  const r = DEFAULT_CONFIG.rooms.find(
-    (x) => x.name.trim().toUpperCase() === clean,
-  );
-  return r ? r.shiftsPerDay : "";
-}
-
-// Coerce rooms to [{ name, days, shiftsPerDay }] — tolerates the old
-// string-array format and partial blobs (missing days or shiftsPerDay) so
-// existing saved configs keep working.
+// Coerce rooms to [{ name, days }] — tolerates the old string-array format and
+// partial blobs (missing days) so existing saved configs keep working. Any
+// legacy `shiftsPerDay` / `shifts` field is dropped.
 function normalizeRooms(rooms) {
   if (!Array.isArray(rooms)) return DEFAULT_CONFIG.rooms;
   return rooms
     .map((r) =>
       typeof r === "string"
-        ? { name: r.trim(), days: "", shiftsPerDay: "" }
+        ? { name: r.trim(), days: "" }
         : {
             name: (r?.name || "").trim(),
             days: r?.days ?? "",
-            shiftsPerDay: r?.shiftsPerDay ?? "",
           },
     )
     .filter((r) => r.name);
@@ -107,16 +83,10 @@ export function getScheduleConfig() {
     if (savedVersion < 2) {
       // Pre-v2 (room/category-based) configs predate the scope presets entirely.
       merged.rooms = DEFAULT_CONFIG.rooms;
-    } else if (savedVersion < SCHEDULE_CONFIG_VERSION) {
-      // v2/v3 → v4: scope presets already exist with their `days`; keep the
-      // user's durations and (re)derive `shiftsPerDay` from defaults by name.
-      // The old total-`shifts` field (v3) is dropped — it's no longer a total.
-      merged.rooms = normalizeRooms(saved.rooms).map((r) => ({
-        ...r,
-        shiftsPerDay:
-          r.shiftsPerDay === "" ? defaultShiftsPerDayFor(r.name) : r.shiftsPerDay,
-      }));
     }
+    // v2/v3/v4 → v5: scope presets already exist with their `days`; keeping the
+    // user's durations and dropping any legacy shift field is handled by
+    // normalizeRooms below, so no per-version remap is needed.
     if (savedVersion < SCHEDULE_CONFIG_VERSION) merged.version = SCHEDULE_CONFIG_VERSION;
     merged.rooms = normalizeRooms(merged.rooms);
     return merged;
@@ -140,11 +110,11 @@ export function resetScheduleConfig() {
 
 // Append a new room/category to the canonical list and persist. Returns the
 // updated rooms array. No-op (returns current) if the name already exists.
-export function addRoomCategory(name, days = "", shiftsPerDay = "") {
+export function addRoomCategory(name, days = "") {
   const trimmed = (name || "").trim();
   const cfg = getScheduleConfig();
   if (!trimmed || cfg.rooms.some((r) => r.name === trimmed)) return cfg.rooms;
-  const rooms = [...cfg.rooms, { name: trimmed, days, shiftsPerDay }];
+  const rooms = [...cfg.rooms, { name: trimmed, days }];
   saveScheduleConfig({ ...cfg, rooms });
   return rooms;
 }
@@ -154,17 +124,6 @@ export function getRoomDefaultDays(name, config = getScheduleConfig()) {
   const cleanName = (name || "").replace(/\s+\d+$/g, "").trim().toUpperCase();
   const r = config.rooms.find((x) => (x.name || "").trim().toUpperCase() === cleanName);
   return r && r.days !== "" && r.days != null ? r.days : "";
-}
-
-// Shifts-per-day configured for a scope/category, or "" if none/unknown. This
-// is the single source for shift requirements (replaces a Shift Master). With
-// the scope's days it gives Total Planned Shifts = days × shiftsPerDay, used for
-// execution planning and progress tracking — it does NOT affect the day-based
-// timeline.
-export function getRoomDefaultShiftsPerDay(name, config = getScheduleConfig()) {
-  const cleanName = (name || "").replace(/\s+\d+$/g, "").trim().toUpperCase();
-  const r = config.rooms.find((x) => (x.name || "").trim().toUpperCase() === cleanName);
-  return r && r.shiftsPerDay !== "" && r.shiftsPerDay != null ? r.shiftsPerDay : "";
 }
 
 // Given a positive days-overdue count, return the matching escalation role
@@ -225,13 +184,12 @@ export function getRoomCategories(config = getScheduleConfig()) {
 }
 
 // Get room/category presets as heading options (rooms as the single source).
-// Returns [{ name, days, shiftsPerDay }] — directly from Schedule Master rooms.
+// Returns [{ name, days }] — directly from Schedule Master rooms.
 export function getRoomCategoryPresets(config = getScheduleConfig()) {
   return (config.rooms || [])
     .map((r) => ({
       name: (r.name || "").trim(),
       days: r.days ?? "",
-      shiftsPerDay: r.shiftsPerDay ?? "",
     }))
     .filter((r) => r.name);
 }

@@ -39,7 +39,7 @@ export const collectGrades = (library = []) => {
   }));
 };
 
-export const gradeLabel = (key = "premium") =>
+export const gradeLabel = (key = "economy") =>
   GRADES.find((grade) => grade.key === key)?.label || labelFromKey(key);
 
 export const blankComponent = () => ({

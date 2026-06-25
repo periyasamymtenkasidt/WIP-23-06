@@ -2,9 +2,7 @@
 // Stored under `item_library` in localStorage; ships with a curated set
 // of common interior fit-out items so the library is useful from day one.
 
-// Schedule Master days mapping commented out — reserved for future use.
-// import { getRoomDefaultDays } from "./scheduleConfig";
-import { seedRecipeFromMaterials } from "./rateBuildup";
+import { seedRecipeFromMaterials, computeRecipe, materialsById } from "./rateBuildup";
 import { listMaterials } from "./materialLibrary";
 
 const STORAGE_KEY = "item_library";
@@ -227,18 +225,29 @@ const normalizeCategory = (cat) =>
   cat in LEGACY_CATEGORY_MAP ? LEGACY_CATEGORY_MAP[cat] : cat || "";
 
 // Normalize category, and seed a per-item `days` (schedule duration). The
-// item's own value is used directly. The Schedule Master fallback (room
-// category → default days) is commented out — reserved for future use.
+// item's own value is used directly.
 // Build the three standard per-grade build-ups for a work from its materials,
 // priced against the Material Master. Each grade re-seeds fresh components (no
 // shared references) and differs only by overhead/margin so the grades carry
 // genuinely different rates.
+
 const seedGradeRecipes = (it, materials) => {
-  const mk = (overheadPct, marginPct) => ({
-    ...seedRecipeFromMaterials(it.materials, materials, it.unit),
-    overheadPct,
-    marginPct,
-  });
+  const mk = (overheadPct, marginPct) => {
+    const rec = seedRecipeFromMaterials(it.materials || [], materials, it.unit);
+    if ((it.materials || []).length === 0) {
+      return {
+        ...rec,
+        labourRate: Number(it.rate) || 0,
+        overheadPct: 0,
+        marginPct: 0,
+      };
+    }
+    return {
+      ...rec,
+      overheadPct,
+      marginPct,
+    };
+  };
   return {
     economy: mk(5, 10),
     premium: mk(10, 20),
@@ -246,13 +255,11 @@ const seedGradeRecipes = (it, materials) => {
   };
 };
 
-const normalizeItem = (it, materials = []) => {
+const normalizeItem = (it, materials) => {
   const category = normalizeCategory(it.category);
-  // const defaultDays = getRoomDefaultDays(category);
-  // const days =
-  //   defaultDays !== "" && defaultDays != null ? defaultDays : (it.days ?? "");
   const days = it.days ?? "";
   let recipes = it.recipes;
+  const resolvedMaterials = materials && materials.length > 0 ? materials : listMaterials();
   // Older rate build-ups initialized all three standard grades as exact
   // clones, so changing grade could never change the quote. Migrate only that
   // legacy default signature; genuinely configured recipes are untouched.
@@ -276,31 +283,37 @@ const normalizeItem = (it, materials = []) => {
   }
   // Seed quality-grade build-ups for any work that has materials but no recipe
   // yet, so every scope carries Economy/Premium/Luxury values — the proposal
-  // can then price and show a grade for it. Service rows (no materials) stay
-  // recipe-less.
-  if (
-    (!recipes || Object.keys(recipes).length === 0) &&
-    (it.materials || []).length > 0
-  ) {
-    recipes = seedGradeRecipes(it, materials);
+  if (!recipes || Object.keys(recipes).length === 0) {
+    recipes = seedGradeRecipes(it, resolvedMaterials);
   }
-  const defaultGrade = it.defaultGrade || "economy";
-  return { ...it, category, days, recipes, defaultGrade };
+  const defaultGrade = "economy";
+
+  // This ensures that the rate displayed in the outside scope items cards
+  // defaults to the economy build-up rate rather than any static default rate.
+  let rate = it.rate;
+  if (recipes?.economy) {
+    const matLookup = materialsById(resolvedMaterials);
+    const res = computeRecipe(recipes.economy, matLookup);
+    rate = Math.round(res.rate || 0) || rate;
+  }
+
+  return { ...it, category, days, recipes, defaultGrade, rate };
 };
 
-// ── Read / Write ──────────────────────────────────────────────────────────
 export const listLibrary = () => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
+    const mList = listMaterials();
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed.map((it) => normalizeItem(it));
+      if (Array.isArray(parsed)) return parsed.map((it) => normalizeItem(it, mList));
     }
   } catch {
     // fall through
   }
   // First read — seed defaults so the library isn't empty.
-  const seeded = DEFAULT_LIBRARY.map((it) => normalizeItem(it));
+  const mList = listMaterials();
+  const seeded = DEFAULT_LIBRARY.map((it) => normalizeItem(it, mList));
   localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
   return seeded;
 };

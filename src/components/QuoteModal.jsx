@@ -43,6 +43,8 @@ import {
   cleanSizeRange,
   validateSizeRangeInput,
   formatSizeRange,
+  digitsOnly,
+  handleSizeRangeKeyDown,
 } from "../utils/sizeRangeValidation";
 
 const quoteRecipientSchema = yup.object().shape({
@@ -403,7 +405,7 @@ const buildInitialFormData = ({
     activePropertyType,
   );
   const activeGrade =
-    initialQuote?.grade || presetData?.grade || cfg.grade || "premium";
+    initialQuote?.grade || presetData?.grade || cfg.grade || "economy";
   // Preserve an already-sent quote exactly on resend. New proposal/sample data
   // gets each scope mapped to its OWN grade (grade is chosen per scope item),
   // falling back to the preset grade for any item without one.
@@ -1211,7 +1213,7 @@ const QuoteModal = ({
     recipientEmail: overrides.recipientEmail ?? formData.recipientEmail,
     recipientPhone: formData.recipientPhone,
     propertyType: formData.propertyType,
-    grade: formData.grade || "premium",
+    grade: formData.grade || "economy",
     sizeRange: cleanSizeRange(overrides.sizeRange ?? watchedSizeRange ?? ""),
     validityDays: Number(formData.validityDays) || 30,
     scopeItems: formData.scopeItems,
@@ -1628,10 +1630,22 @@ const QuoteModal = ({
                     name="sizeRange"
                     label="Size"
                     type="text"
+                    inputMode="numeric"
                     register={register("sizeRange")}
+                    onKeyDown={handleSizeRangeKeyDown}
+                    onChange={(e) => {
+                      // Whole numbers only — strip any non-digit (incl. - and +),
+                      // covering paste/drop that the keydown guard can't catch.
+                      const digits = digitsOnly(e.target.value);
+                      if (digits !== e.target.value) {
+                        rhfSetValue("sizeRange", digits, {
+                          shouldValidate: true,
+                        });
+                      }
+                    }}
                     error={errors.sizeRange?.message}
                     suffix="Sq Ft"
-                    placeholder="e.g. 800-1100"
+                    placeholder="e.g. 1000"
                   />
                 </div>
                 <div className="mt-3">
@@ -1773,7 +1787,13 @@ const QuoteModal = ({
                                 />
                                 <input
                                   type="number"
-                                  value={item.amount}
+                                  value={
+                                    item.amount === "" ||
+                                    item.amount === null ||
+                                    item.amount === undefined
+                                      ? ""
+                                      : Math.round(Number(item.amount) || 0)
+                                  }
                                   onChange={(e) =>
                                     updateScope(idx, "amount", e.target.value)
                                   }
@@ -1816,7 +1836,9 @@ const QuoteModal = ({
                                       Quantity:{" "}
                                     </span>
                                     <span className="font-semibold">
-                                      {Number(item.qty).toLocaleString("en-IN")}{" "}
+                                      {Math.round(
+                                        Number(item.qty),
+                                      ).toLocaleString("en-IN")}{" "}
                                       {item.unit}
                                     </span>
                                   </span>

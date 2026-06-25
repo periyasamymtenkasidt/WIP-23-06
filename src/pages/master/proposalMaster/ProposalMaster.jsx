@@ -47,6 +47,8 @@ import { formatAmount } from "../../../utils/formatAmount";
 import {
   validateSizeRangeInput,
   formatSizeRange,
+  digitsOnly,
+  handleSizeRangeKeyDown,
 } from "../../../utils/sizeRangeValidation";
 import { UNITS } from "../../../data/boqUnits";
 import {
@@ -479,6 +481,20 @@ const ProposalMaster = () => {
     applyGradeToConfig(activeGrade);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeKey, activeConfigIdx, activeGrade, activeConfig?.scopeItems?.length]);
+
+  // When the Item Master library is updated (e.g. after saving a rate build-up
+  // in the Rate Build-up modal), re-map every scope item to the active grade
+  // so the new recipe rates/materials flow into the scope cards immediately.
+  // Without this, the scope cards would keep showing the old rates until the
+  // user manually switches grades.
+  useEffect(() => {
+    if (libVersion === 0) return; // skip the initial mount
+    if (!active || !activeConfig) return;
+    const items = activeConfig.scopeItems || [];
+    if (items.length === 0) return;
+    applyGradeToConfig(activeGrade);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [libVersion]);
 
   const updateScope = (idx, key, value) => {
     setConfigField((cfg) => {
@@ -913,7 +929,7 @@ const ProposalMaster = () => {
       const amount = Number(s.amount) || 0;
       const lib = s.masterId ? libById[s.masterId] : null;
       const recipe = lib?.recipes?.[
-        s.grade || s.defaultGrade || activeConfig?.grade || lib.defaultGrade || "premium"
+        s.grade || s.defaultGrade || activeConfig?.grade || lib.defaultGrade || "economy"
       ];
       const c = recipe ? computeRecipe(recipe, matById) : null;
       if (c && c.rate > 0) {
@@ -1247,11 +1263,13 @@ const ProposalMaster = () => {
                   <div className="relative flex items-center">
                     <input
                       type="text"
+                      inputMode="numeric"
                       value={activeConfig?.sizeRange || ""}
+                      onKeyDown={handleSizeRangeKeyDown}
                       onChange={(e) => {
-                        const val = e.target.value;
-                        const err = validateSizeRangeInput(val);
-                        setSizeRangeError(err);
+                        // Whole numbers only — strip any non-digit (incl. - and +).
+                        const val = digitsOnly(e.target.value);
+                        setSizeRangeError(validateSizeRangeInput(val));
                         setConfigField((cfg) => {
                           const totalArea = parseBaseArea(val) || 0;
                           const roomAllocations = getNormalizedAllocations(cfg.scopeItems, cfg.roomAllocations || {});
@@ -1265,7 +1283,7 @@ const ProposalMaster = () => {
                           };
                         });
                       }}
-                      placeholder="e.g. 800-1100"
+                      placeholder="e.g. 1000"
                       className={`${inputBase} pr-14`}
                     />
                     <span className="absolute right-3 text-[10px] font-bold text-gray-400 pointer-events-none uppercase">
@@ -1603,29 +1621,23 @@ const ProposalMaster = () => {
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center justify-end gap-2">
-                  <div className="flex flex-wrap items-center gap-1 rounded-lg border border-bordergray bg-bg-soft/50 p-1">
-                    <span className="px-1.5 text-[9px] font-bold uppercase tracking-wider text-text-muted">
+                  <label className="flex items-center gap-1.5 rounded-lg border border-bordergray bg-bg-soft/50 px-2 py-1">
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-text-muted">
                       Grade
                     </span>
-                    {availableGrades.map((grade) => {
-                      const selected = activeGrade === grade.key;
-                      return (
-                        <button
-                          key={grade.key}
-                          type="button"
-                          onClick={() => handleGradeChange(grade.key)}
-                          title={`Apply ${grade.label} Item Master rates and materials`}
-                          className={`rounded-md border px-2 py-1 text-[10px] font-semibold transition-all ${
-                            selected
-                              ? "border-select-blue bg-select-blue text-white shadow-sm"
-                              : "border-transparent bg-white text-text-muted hover:border-select-blue/30 hover:text-select-blue"
-                          }`}
-                        >
+                    <select
+                      value={activeGrade}
+                      onChange={(e) => handleGradeChange(e.target.value)}
+                      title="Apply the selected grade's Item Master rates and materials"
+                      className="bg-white border border-bordergray rounded-md px-2 py-1 text-[10px] font-semibold text-textcolor cursor-pointer focus:outline-none focus:border-select-blue"
+                    >
+                      {availableGrades.map((grade) => (
+                        <option key={grade.key} value={grade.key}>
                           {grade.label}
-                        </button>
-                      );
-                    })}
-                  </div>
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <button
                     type="button"
                     onClick={() => setPreviewOpen(true)}

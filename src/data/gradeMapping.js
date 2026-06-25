@@ -23,7 +23,7 @@ const findLibraryItem = (scope, library) => {
 
 // Apply an Item Master's composite grade rate to a single proposal row without
 // changing its room, description, dimensions, assumed quantity, or identity.
-export const mapScopeItemToGrade = (scope, grade = "premium") => {
+export const mapScopeItemToGrade = (scope, grade = "economy") => {
   const library = listLibrary();
   const materialLookup = materialsById(listMaterials());
 
@@ -57,10 +57,10 @@ export const mapScopeItemToGrade = (scope, grade = "premium") => {
 // Apply an Item Master's composite grade rate to proposal rows without
 // changing their room, description, dimensions, assumed quantity, or identity.
 // When `grade` is null/undefined, each row keeps its own `grade` (falling back
-// to "premium"), so a quote can carry a different grade per scope item.
-export const mapScopeItemsToGrade = (scopeItems = [], grade = "premium") => {
+// to "economy"), so a quote can carry a different grade per scope item.
+export const mapScopeItemsToGrade = (scopeItems = [], grade = "economy") => {
   return scopeItems.map((scope) =>
-    mapScopeItemToGrade(scope, grade ?? scope.grade ?? "premium"),
+    mapScopeItemToGrade(scope, grade ?? scope.grade ?? "economy"),
   );
 };
 

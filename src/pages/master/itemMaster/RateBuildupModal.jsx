@@ -111,12 +111,11 @@ const RateBuildupModal = ({ item, onSave, onClose }) => {
     }
     setDeleteTargetKey(key);
   };
-
   const confirmDeleteGrade = () => {
     if (!deleteTargetKey) return;
     const key = deleteTargetKey;
     const keys = Object.keys(recipes || {});
-    const nextActive = keys.find((k) => k !== key) || "premium";
+    const nextActive = keys.find((k) => k !== key) || "economy";
 
     setRecipes((rs) => {
       const next = { ...rs };
@@ -165,10 +164,11 @@ const RateBuildupModal = ({ item, onSave, onClose }) => {
     }
     setEditTargetKey(null);
   };
-
   const save = () => {
-    const defaultRecipe = recipes[activeGrade] || blankRecipe();
-    const mappedMaterials = (defaultRecipe.components || []).map((c) => {
+    // We always save the economy grade's materials/rate on the item itself so the outside card
+    // shows the economy rate and materials by default.
+    const economyRecipe = recipes.economy || blankRecipe();
+    const mappedMaterials = (economyRecipe.components || []).map((c) => {
       const mat = matById[c.materialId];
       const factor = (Number(c.qty) || 0) * (1 + (Number(c.wastagePct) || 0) / 100);
       return {
@@ -183,8 +183,8 @@ const RateBuildupModal = ({ item, onSave, onClose }) => {
     onSave({
       ...item,
       recipes,
-      defaultGrade: activeGrade,
-      rate: Math.round(allRates[activeGrade] || 0),
+      defaultGrade: "economy",
+      rate: Math.round(allRates.economy || 0),
       materials: mappedMaterials,
     });
   };

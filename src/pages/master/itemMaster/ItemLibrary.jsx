@@ -21,6 +21,7 @@ import {
   blankLibraryItem,
 } from "../../../data/itemLibrary";
 import { UNITS } from "../../../data/boqUnits";
+import { gradeLabel } from "../../../data/rateBuildup";
 import { formatAmount } from "../../../utils/formatAmount";
 import ItemFormModal from "../../../components/ItemFormModal";
 import RateBuildupModal from "./RateBuildupModal";
@@ -255,6 +256,20 @@ const ItemLibrary = () => {
   );
 };
 
+// Quality-grade shorthand for the card chip — two letters from each word (up to
+// three words), uppercased: "Economy" → "EC", "Ultra Premium" → "ULPR". Mirrors
+// the shorthand used in the Proposal form's live preview.
+const gradeShorthand = (key) => {
+  const label = gradeLabel(key);
+  if (!label) return "";
+  return label
+    .trim()
+    .split(/\s+/)
+    .slice(0, 3)
+    .map((word) => word.slice(0, 2).toUpperCase())
+    .join("");
+};
+
 const ItemCard = ({ item, onEdit, onDelete, onBuildup }) => {
   const unitLabel = UNITS.find((u) => u.code === item.unit)?.label || item.unit;
   return (
@@ -292,6 +307,9 @@ const ItemCard = ({ item, onEdit, onDelete, onBuildup }) => {
       >
         <p className="text-[12.5px] font-semibold text-textcolor leading-snug line-clamp-2 pr-14">
           {item.description}
+          {gradeShorthand(item.defaultGrade) && (
+            <span> ({gradeShorthand(item.defaultGrade)})</span>
+          )}
         </p>
         {(item.materials || []).length > 0 && (
           <p className="text-[10.5px] text-text-muted mt-1.5 line-clamp-2">
@@ -317,11 +335,6 @@ const ItemCard = ({ item, onEdit, onDelete, onBuildup }) => {
             <span>GST {item.gstPercent}%</span>
           </div>
           <div className="flex flex-col items-end">
-            {item.recipes && (
-              <span className="text-[8.5px] font-bold uppercase tracking-wider text-select-blue bg-active-bg px-1.5 py-0.5 rounded mb-0.5">
-                {item.defaultGrade || "premium"} · built-up
-              </span>
-            )}
             <span className="text-[14px] font-bold text-textcolor tabular-nums leading-tight">
               ₹{Number(item.rate || 0).toLocaleString("en-IN")}
             </span>

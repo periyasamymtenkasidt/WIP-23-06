@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
   Layers,
   Plus,
@@ -13,19 +13,12 @@ import {
   IndianRupee,
   AlertTriangle,
   Info,
-  RotateCcw,
   CheckCircle2,
 } from "lucide-react";
-import {
-  listMaterials,
-  saveMaterials,
-  resetMaterials,
-} from "../../../data/materialLibrary";
+import { listMaterials, saveMaterials } from "../../../data/materialLibrary";
 import { listLibrary } from "../../../data/itemLibrary";
-import { listVendors } from "../../../data/vendorStorage";
 import { formatAmount } from "../../../utils/formatAmount";
 import InputField from "../../../components/InputField";
-import SearchableSelect from "../../../components/SearchableSelect";
 
 const MATERIAL_UNITS = [
   { code: "bag", label: "Bag (Cement)" },
@@ -41,7 +34,6 @@ const MATERIAL_UNITS = [
 
 const MaterialMaster = () => {
   const [materials, setMaterials] = useState(() => listMaterials());
-  const [hasChanges, setHasChanges] = useState(false);
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState(null); // holds material being edited/created
   const [toast, setToast] = useState(null);
@@ -51,6 +43,17 @@ const MaterialMaster = () => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 2400);
   };
+
+  // Auto-save: persist the catalog to storage on every change. Skips the very
+  // first render so the initial load isn't re-written needlessly.
+  const isFirstRender = useRef(true);
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    saveMaterials(materials);
+  }, [materials]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -66,24 +69,6 @@ const MaterialMaster = () => {
       );
     });
   }, [materials, query]);
-
-  const vendors = useMemo(() => listVendors(), []);
-  const vendorOptions = useMemo(
-    () => vendors.map((v) => ({ value: v.id, label: v.name })),
-    [vendors],
-  );
-
-  // If the material being edited references a vendor that's since been
-  // deleted from Vendor Master, inject its saved name as a synthetic option
-  // so the dropdown shows "Acme Supplies" instead of the raw orphaned id.
-  const editingVendorId = editing?.vendorId;
-  const editingVendorOptions =
-    editingVendorId && !vendors.some((v) => v.id === editingVendorId)
-      ? [
-          { value: editingVendorId, label: editing.vendorName || "Unknown vendor (deleted)" },
-          ...vendorOptions,
-        ]
-      : vendorOptions;
 
   // Derived (not stored) — counts how many Item Master recipes reference
   // each material, by scanning every grade's components. Avoids a stored
@@ -170,7 +155,7 @@ const MaterialMaster = () => {
             : m,
         ),
       );
-      showToast("Material updated (unsaved changes)", "success");
+      showToast("Material updated", "success");
     } else {
       // Create
       const newMat = {
@@ -180,9 +165,8 @@ const MaterialMaster = () => {
         updatedAt: new Date().toISOString(),
       };
       setMaterials((prev) => [newMat, ...prev]);
-      showToast("Material added (unsaved changes)", "success");
+      showToast("Material added", "success");
     }
-    setHasChanges(true);
     setEditing(null);
   };
 
@@ -195,31 +179,9 @@ const MaterialMaster = () => {
       danger: true,
       onConfirm: () => {
         setMaterials((prev) => prev.filter((m) => m.id !== item.id));
-        setHasChanges(true);
-        showToast("Material deleted (unsaved changes)", "info");
+        showToast("Material deleted", "info");
       },
     });
-  };
-
-  const handleReset = () => {
-    setConfirmDialog({
-      title: "Reset Materials to Defaults?",
-      message:
-        "This will clear all custom materials and restore the default civil materials list.",
-      confirmLabel: "Reset Catalog",
-      danger: true,
-      onConfirm: () => {
-        setMaterials(resetMaterials());
-        setHasChanges(false);
-        showToast("Materials master reset to defaults", "success");
-      },
-    });
-  };
-
-  const persistChanges = () => {
-    saveMaterials(materials);
-    setHasChanges(false);
-    showToast("Material Master saved successfully", "success");
   };
 
   return (
@@ -242,13 +204,12 @@ const MaterialMaster = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleReset}
-              className="flex items-center gap-1.5 px-3 py-2 bg-white border border-bordergray rounded-lg text-[12px] font-semibold text-text-muted hover:bg-bg-soft hover:text-textcolor transition-all cursor-pointer"
+            <span
+              title="Changes are saved automatically"
+              className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-semibold text-text-muted bg-bg-soft border border-bordergray"
             >
-              <RotateCcw size={12} /> Reset Catalog
-            </button>
+              <CheckCircle2 size={13} /> Auto-saved
+            </span>
             <button
               type="button"
               onClick={() =>
@@ -265,15 +226,6 @@ const MaterialMaster = () => {
             >
               <Plus size={13} /> New Material
             </button>
-            {hasChanges && (
-              <button
-                type="button"
-                onClick={persistChanges}
-                className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[12px] font-semibold shadow-md transition-all cursor-pointer animate-pulse"
-              >
-                <CheckCircle2 size={13} strokeWidth={3} /> Save Changes
-              </button>
-            )}
           </div>
         </div>
 
@@ -494,14 +446,6 @@ const MaterialMaster = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <InputField
-                  label="Brand / Manufacturer"
-                  value={editing.brand || ""}
-                  onChange={(e) =>
-                    setEditing((prev) => ({ ...prev, brand: e.target.value }))
-                  }
-                  placeholder="e.g. UltraTech, Tata"
-                />
-                <InputField
                   type="select"
                   label="Category"
                   value={editing.category || "General"}
@@ -511,9 +455,6 @@ const MaterialMaster = () => {
                   options={["General", "Civil", "Carpentry", "Electrical", "Plumbing", "Painting", "Flooring"]}
                   placeholder="Select Category"
                 />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
                 <InputField
                   label="Material SKU / Code"
                   value={editing.sku || ""}
@@ -522,30 +463,6 @@ const MaterialMaster = () => {
                   }
                   placeholder="e.g. MAT-CEM-01"
                 />
-                <div className="flex flex-col">
-                  <label className="mb-1 text-[11px] font-semibold text-darkgray">
-                    Preferred Vendor
-                  </label>
-                  <SearchableSelect
-                    value={editing.vendorId || ""}
-                    onChange={(val) => {
-                      const v = vendors.find((vv) => vv.id === val);
-                      setEditing((prev) => ({
-                        ...prev,
-                        vendorId: val,
-                        vendorName: v?.name || "",
-                      }));
-                    }}
-                    options={editingVendorOptions}
-                    placeholder="Select vendor"
-                    className="bg-light-gray border border-bordergray text-[11px] text-darkgray rounded-md px-3 py-2 w-full focus:outline-none focus:border-gray-300 focus:ring-1 focus:ring-gray-300 placeholder-gray-400"
-                  />
-                  {!editing.vendorId && editing.vendor && (
-                    <p className="text-[10px] text-text-subtle mt-1">
-                      Previously: {editing.vendor} — pick a vendor above to link it.
-                    </p>
-                  )}
-                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">

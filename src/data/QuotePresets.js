@@ -4,14 +4,21 @@
 // localStorage from the Settings → Proposal Master page.
 
 import { getRoomDefaultDays } from "./scheduleConfig";
-import { cleanSizeRange } from "../utils/sizeRangeValidation";
+import { toSingleSize } from "../utils/sizeRangeValidation";
 import { normalizeScopeItem } from "../utils/scopeNaming";
-import { DEFAULT_LIBRARY } from "./itemLibrary";
+import { DEFAULT_LIBRARY, listLibrary } from "./itemLibrary";
 import {
   parseBaseArea,
   getNormalizedAllocations,
   estimateScopeItems,
 } from "./scopeEstimator";
+
+import {
+  computeRecipe,
+  materialsById as buildMaterialsById,
+  recipeToMaterials,
+} from "./rateBuildup";
+import { listMaterials } from "./materialLibrary";
 
 export const GST_RATE = 18;
 
@@ -36,12 +43,64 @@ const COMMON_EXCLUSIONS = [];
 // Calculations" toggle uses (`scopeEstimator.js`) to turn that factor into a
 // real qty/amount from the preset's size range, so every preset ships with
 // Smart Estimator already on.
-const libByName = new Map(DEFAULT_LIBRARY.map((it) => [it.description, it]));
+//
+// The rate defaults to the **economy** grade's recipe-computed rate so the
+// scope card always shows a live rate-build-up value rather than the static
+// catalog number.  When the user switches grades or saves a rate build-up,
+// `mapScopeItemsToGrade` recomputes the rate from the selected grade's recipe.
 
+// Lazy lookup: uses `listLibrary()` which returns items with seeded grade
+// recipes (via `normalizeItem`), so `economyRateFor` can compute a real
+// recipe-based rate instead of falling back to the static catalog number.
+// A fresh Map is built on every call so it always reflects the latest
+// Item Master state (e.g. after a rate build-up save).
+const getLibByName = () => {
+  const map = new Map();
+  for (const it of listLibrary()) {
+    map.set(it.description, it);
+  }
+  return map;
+};
+
+// Compute the economy grade rate from the item's recipes. Falls back to the
+// static catalog rate when no recipe exists.
+const economyRateFor = (lib) => {
+  const matLookup = buildMaterialsById(listMaterials());
+  const recipe = lib.recipes?.economy;
+  if (!recipe) return Number(lib.rate) || 0;
+  const result = computeRecipe(recipe, matLookup);
+  return Math.round(result.rate || 0) || Number(lib.rate) || 0;
+};
+
+// Build materials from the economy recipe so the scope row carries real
+// recipe-linked materials instead of the generic catalog specs.
+const economyMaterialsFor = (lib) => {
+  const matLookup = buildMaterialsById(listMaterials());
+  const recipe = lib.recipes?.economy;
+  if (!recipe) return (lib.materials || []).map((m) => ({ ...m }));
+  return recipeToMaterials(recipe, matLookup);
+};
 const scopeRow = (area, itemDescription, areaFactor = 1) => {
-  const lib = libByName.get(itemDescription);
+  const libByName = getLibByName();
+  let lib = libByName.get(itemDescription);
   if (!lib) {
-    throw new Error(`Item Master seed: no catalog item named "${itemDescription}"`);
+    lib = DEFAULT_LIBRARY.find((it) => it.description === itemDescription);
+  }
+  if (!lib) {
+    return {
+      area,
+      heading: area,
+      itemName: itemDescription,
+      description: "Custom specification",
+      masterId: `custom_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      unit: "nos",
+      areaFactor,
+      rate: 1000,
+      days: 2,
+      defaultGrade: "economy",
+      grade: "economy",
+      materials: [],
+    };
   }
   return {
     area,
@@ -51,9 +110,12 @@ const scopeRow = (area, itemDescription, areaFactor = 1) => {
     masterId: lib.id,
     unit: lib.unit,
     areaFactor,
-    rate: Number(lib.rate) || 0,
+    rate: economyRateFor(lib),
     days: lib.days || 0,
-    materials: (lib.materials || []).map((m) => ({ ...m })),
+    recipes: lib.recipes || undefined,
+    defaultGrade: lib.defaultGrade || "economy",
+    grade: "economy",
+    materials: economyMaterialsFor(lib),
   };
 };
 
@@ -223,9 +285,9 @@ export const DEFAULT_PRESETS = {
     label: "1 BHK Apartment",
     propertyType: "Apartment",
     propertyTypes: ["Apartment", "Studio Apartment"],
-    sizeRange: "450-600",
+    sizeRange: "525",
     enableFormulaEstimator: true,
-    ...seedConfig("450-600", ONE_BHK_RAW),
+    ...seedConfig("525", ONE_BHK_RAW),
     inclusions: COMMON_INCLUSIONS,
     exclusions: COMMON_EXCLUSIONS,
   },
@@ -233,9 +295,9 @@ export const DEFAULT_PRESETS = {
     label: "2 BHK Apartment",
     propertyType: "Apartment",
     propertyTypes: ["Apartment", "Penthouse", "Duplex"],
-    sizeRange: "800-1100",
+    sizeRange: "950",
     enableFormulaEstimator: true,
-    ...seedConfig("800-1100", TWO_BHK_RAW),
+    ...seedConfig("950", TWO_BHK_RAW),
     inclusions: COMMON_INCLUSIONS,
     exclusions: COMMON_EXCLUSIONS,
   },
@@ -243,9 +305,9 @@ export const DEFAULT_PRESETS = {
     label: "3 BHK Apartment",
     propertyType: "Apartment",
     propertyTypes: ["Apartment", "Penthouse", "Duplex", "Independent House"],
-    sizeRange: "1200-1600",
+    sizeRange: "1400",
     enableFormulaEstimator: true,
-    ...seedConfig("1200-1600", THREE_BHK_RAW),
+    ...seedConfig("1400", THREE_BHK_RAW),
     inclusions: COMMON_INCLUSIONS,
     exclusions: COMMON_EXCLUSIONS,
   },
@@ -258,9 +320,9 @@ export const DEFAULT_PRESETS = {
       "Farm House",
       "Beach House",
     ],
-    sizeRange: "2400+",
+    sizeRange: "2400",
     enableFormulaEstimator: true,
-    ...seedConfig("2400+", VILLA_RAW),
+    ...seedConfig("2400", VILLA_RAW),
     inclusions: COMMON_INCLUSIONS,
     exclusions: COMMON_EXCLUSIONS,
   },
@@ -337,7 +399,7 @@ const normalizePreset = (p) => {
     next.configurations = next.configurations.map((c) => ({
       ...c,
       propertyType: c.propertyType || "",
-      sizeRange: cleanSizeRange(c.sizeRange ?? next.sizeRange ?? ""),
+      sizeRange: toSingleSize(c.sizeRange ?? next.sizeRange ?? ""),
       scopeItems: (c.scopeItems || []).map(mapScopeItem),
       inclusions: c.inclusions || [],
       exclusions: c.exclusions || [],
@@ -369,7 +431,7 @@ const normalizePreset = (p) => {
     enableFormulaEstimator: next.enableFormulaEstimator ?? false,
     totalArea: next.totalArea,
     roomAllocations: next.roomAllocations || {},
-    sizeRange: cleanSizeRange(sharedSize),
+    sizeRange: toSingleSize(sharedSize),
     scopeItems: sharedScope.map(mapScopeItem),
     inclusions: [...sharedInclusions],
     exclusions: [...sharedExclusions],

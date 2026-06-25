@@ -1355,9 +1355,10 @@ const LeadEdit = () => {
             // Keep the inquiry snapshot aligned with the grade/rates actually
             // sent so subsequent proposal opens use it.
             const quotePatch = {
-              quoteGrade: quote?.grade || "premium",
+              quoteGrade: quote?.grade || "economy",
               quoteScopeItems: quote?.scopeItems || lead.quoteScopeItems,
             };
+
             const savedLeads = JSON.parse(
               localStorage.getItem("newLeadsData") || "[]",
             );

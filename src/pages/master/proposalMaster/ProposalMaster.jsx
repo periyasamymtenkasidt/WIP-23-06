@@ -17,10 +17,8 @@ import {
   CheckCircle2,
   XCircle,
   Sparkles,
-  TrendingUp,
-  Hash,
+  // TrendingUp, Hash — used only by the hidden stats banner (commented out below)
   IndianRupee,
-  GripVertical,
   ChefHat,
   Sofa,
   Bed,
@@ -76,7 +74,10 @@ import {
   collectGrades,
   gradeLabel,
 } from "../../../data/rateBuildup";
-import { mapScopeItemsToGrade } from "../../../data/gradeMapping";
+import {
+  mapScopeItemsToGrade,
+  syncScopeItemsToLibrary,
+} from "../../../data/gradeMapping";
 import { PROPERTY_TYPES } from "../../../helperConfigData/helperData";
 import {
   getGlobalPropertyTypes,
@@ -466,85 +467,65 @@ const ProposalMaster = () => {
     }
   };
 
-  // Auto-map the scope of work to the selected quality grade. Whenever a config
-  // loads, its grade changes, or a row is added, any row not yet aligned to the
-  // active grade is mapped to that grade's Item Master rate/materials/amount —
-  // so the scope data always reflects the selected grade without a manual
-  // toggle. Rows already tagged with the active grade are left untouched, so
-  // this never loops and never clobbers manual rate edits on aligned rows.
+  // Reflect the Item Master into the Scope of Work. The Master page is tabbed, so
+  // Proposal Master is unmounted while the user edits in the Item Master tab —
+  // the live `itemLibraryChanged` event therefore can't be relied on. Instead we
+  // re-derive every linked scope row from the master whenever this config loads
+  // (e.g. on returning to the tab), the active grade changes, a row is added, or
+  // the library changes in a background window (libVersion):
+  //   1. sync the descriptive fields (name, spec, HSN, unit, GST, days) — except
+  //      fields the user has hand-edited on the row (isItemNameCustom /
+  //      isDescriptionCustom), so manual wording is preserved;
+  //   2. re-map rate / materials / amount to the active grade;
+  //   3. recalculate the area-based estimator.
+  // It writes only when the derived rows actually differ from the current ones,
+  // so it never loops and is a no-op once everything is already in sync.
   useEffect(() => {
     if (!active || !activeConfig) return;
     const items = activeConfig.scopeItems || [];
     if (items.length === 0) return;
-    const aligned = items.every((it) => (it.grade || "") === activeGrade);
-    if (aligned) return;
-    applyGradeToConfig(activeGrade);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeKey, activeConfigIdx, activeGrade, activeConfig?.scopeItems?.length]);
 
-  // When the Item Master library is updated (e.g. after saving a rate build-up
-  // in the Rate Build-up modal), re-map every scope item to the active grade
-  // so the new recipe rates/materials flow into the scope cards immediately.
-  // Without this, the scope cards would keep showing the old rates until the
-  // user manually switches grades.
-  useEffect(() => {
-    if (libVersion === 0) return; // skip the initial mount
-    if (!active || !activeConfig) return;
-    const items = activeConfig.scopeItems || [];
-    if (items.length === 0) return;
-    applyGradeToConfig(activeGrade);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [libVersion]);
+    let target = syncScopeItemsToLibrary(items);
+    target = mapScopeItemsToGrade(target, activeGrade);
+    if (activeConfig.enableFormulaEstimator) {
+      const totalArea =
+        activeConfig.totalArea || parseBaseArea(activeConfig.sizeRange) || 1000;
+      const allocations = getNormalizedAllocations(
+        target,
+        activeConfig.roomAllocations || {},
+      );
+      target = recalculateScopeItems(target, totalArea, allocations, true);
+    }
 
-  const updateScope = (idx, key, value) => {
-    setConfigField((cfg) => {
-      // Check for duplicate heading if changing the area/heading field
-      if (key === "area") {
-        const item = cfg.scopeItems[idx];
-        const newHeading = value.trim().toUpperCase();
-        const duplicateExists = cfg.scopeItems.some((s, i) => {
-          if (i === idx) return false;
-          return (
-            (s.area || s.heading || "").trim().toUpperCase() === newHeading &&
-            (s.itemName || "").trim().toLowerCase() ===
-              (item.itemName || "").trim().toLowerCase()
-          );
-        });
-
-        if (duplicateExists) {
-          showToast(
-            `"${item.itemName}" already exists under heading "${newHeading}".`,
-            "error",
-          );
-          return cfg; // Do not update
-        }
-      }
-
-      const scopeItems = cfg.scopeItems.map((s, i) => {
-          if (i !== idx) return s;
-          const target = { ...s, [key]: value };
-          if (key === "description") {
-            target.isDescriptionCustom = true;
-          }
-          if (key === "area") {
-            target.isAreaCustom = true;
-          }
-          if (key === "itemName") {
-            target.isItemNameCustom = true;
-          }
-          return target;
-        });
-
-      if (key === "area" || key === "rate" || key === "unit") {
-        return recalculateConfigScope(cfg, scopeItems);
-      }
-
-      return {
-        ...cfg,
-        scopeItems,
-      };
+    const differs = target.some((t, i) => {
+      const o = items[i];
+      return (
+        t.itemName !== o.itemName ||
+        t.spec !== o.spec ||
+        t.hsn !== o.hsn ||
+        t.unit !== o.unit ||
+        t.gstPercent !== o.gstPercent ||
+        t.days !== o.days ||
+        t.rate !== o.rate ||
+        t.amount !== o.amount ||
+        (t.grade || "") !== (o.grade || "")
+      );
     });
-  };
+    if (!differs) return;
+
+    setConfigField((config) => ({
+      ...config,
+      grade: activeGrade,
+      scopeItems: target,
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    activeKey,
+    activeConfigIdx,
+    activeGrade,
+    activeConfig?.scopeItems?.length,
+    libVersion,
+  ]);
 
   // Save handler for the shared Item Form modal opened by "Add Scope".
   const handleScopeFormSave = (formOrArray) => {
@@ -680,35 +661,9 @@ const ProposalMaster = () => {
     showToast("Scope item removed", "info");
   };
 
-  const updateMaterial = (scopeIdx, matIdx, key, value) => {
-    setConfigField((cfg) => ({
-      ...cfg,
-      scopeItems: cfg.scopeItems.map((s, i) =>
-        i === scopeIdx
-          ? {
-              ...s,
-              materials: (s.materials || []).map((m, j) =>
-                j === matIdx ? { ...m, [key]: value } : m,
-              ),
-            }
-          : s,
-      ),
-    }));
-  };
-
-  const addMaterial = (scopeIdx, preset) => {
-    const newMat = preset ?? { name: "", spec: "" };
-    setConfigField((cfg) => ({
-      ...cfg,
-      scopeItems: cfg.scopeItems.map((s, i) =>
-        i === scopeIdx
-          ? { ...s, materials: [...(s.materials || []), newMat] }
-          : s,
-      ),
-    }));
-    setExpanded((p) => ({ ...p, [scopeIdx]: true }));
-  };
-
+  // Remove a single material line from a scope row. Note: re-mapping a scope to
+  // a grade (grade switch / tab return / library change) re-seeds materials from
+  // the rate build-up, so a removed material reappears on the next re-map.
   const removeMaterial = (scopeIdx, matIdx) => {
     setConfigField((cfg) => ({
       ...cfg,
@@ -845,26 +800,27 @@ const ProposalMaster = () => {
     );
   }, [presetKeys, presetSearch, master]);
 
-  const globalStats = useMemo(() => {
-    const allItems = presetKeys.flatMap((k) =>
-      (master[k]?.configurations || []).flatMap((c) => c.scopeItems || []),
-    );
-    const totalAmount = allItems.reduce(
-      (s, it) => s + (Number(it.amount) || 0),
-      0,
-    );
-    const totalMaterials = allItems.reduce(
-      (s, it) => s + (it.materials?.length || 0),
-      0,
-    );
-    return {
-      presets: presetKeys.length,
-      items: allItems.length,
-      materials: totalMaterials,
-      avgQuote:
-        presetKeys.length > 0 ? Math.round(totalAmount / presetKeys.length) : 0,
-    };
-  }, [presetKeys, master]);
+  // Stats banner hidden per request — keep the aggregation for future use.
+  // const globalStats = useMemo(() => {
+  //   const allItems = presetKeys.flatMap((k) =>
+  //     (master[k]?.configurations || []).flatMap((c) => c.scopeItems || []),
+  //   );
+  //   const totalAmount = allItems.reduce(
+  //     (s, it) => s + (Number(it.amount) || 0),
+  //     0,
+  //   );
+  //   const totalMaterials = allItems.reduce(
+  //     (s, it) => s + (it.materials?.length || 0),
+  //     0,
+  //   );
+  //   return {
+  //     presets: presetKeys.length,
+  //     items: allItems.length,
+  //     materials: totalMaterials,
+  //     avgQuote:
+  //       presetKeys.length > 0 ? Math.round(totalAmount / presetKeys.length) : 0,
+  //   };
+  // }, [presetKeys, master]);
 
   const sortedScope = useMemo(() => {
     if (!activeConfig) return [];
@@ -913,7 +869,6 @@ const ProposalMaster = () => {
 
   const scopeItems = activeConfig?.scopeItems || [];
   const totals = computeTotals(scopeItems);
-  const maxScope = Math.max(1, ...scopeItems.map((s) => Number(s.amount) || 0));
   // Cost split — materials vs labour vs margin — aggregated from each scope
   // item's rate build-up (via its linked Item Master recipe). Items without a
   // build-up fall into "No build-up".
@@ -942,6 +897,9 @@ const ProposalMaster = () => {
     }
     return { material, labour, margin, other, total: material + labour + margin + other };
   })();
+
+  // Material lookup for pricing each material line from the rate build-up.
+  const matById = materialsById(listMaterials());
 
   return (
     <div className="bg-overallbg font-sans h-full overflow-hidden flex flex-col">
@@ -980,7 +938,7 @@ const ProposalMaster = () => {
           </div>
         </div>
 
-        {/* Bento stats banner */}
+        {/* Bento stats banner — hidden per request; keep for future use.
         <div className="px-6 pb-4 grid grid-cols-2 lg:grid-cols-4 gap-3">
           <BentoStat
             icon={<Layers size={13} />}
@@ -1007,46 +965,31 @@ const ProposalMaster = () => {
             tint="emerald"
           />
         </div>
+        */}
       </div>
 
-      <div className="px-6 py-5 flex-1 min-h-0 overflow-hidden">
-        <div className="grid grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)_340px] gap-5 items-stretch h-full">
-          {/* ── Left: Preset rail ───────────────────────────────────────── */}
-          <aside className="bg-white rounded-2xl border border-bordergray shadow-[0_1px_3px_rgba(15,23,42,0.04)] flex flex-col overflow-y-auto scroll-hidden-bar">
-            <div className="p-4 border-b border-bordergray shrink-0">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-1.5">
-                  <Layers size={13} className="text-select-blue" />
-                  <h3 className="text-[11px] font-bold uppercase tracking-wider text-textcolor">
-                    Presets
-                  </h3>
-                </div>
-                <span className="text-[10px] font-semibold text-text-muted bg-bg-soft px-1.5 py-0.5 rounded-md">
-                  {presetKeys.length}
-                </span>
-              </div>
-              <div className="relative">
-                <Search
-                  size={12}
-                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-subtle"
-                />
-                <input
-                  type="text"
-                  value={presetSearch}
-                  onChange={(e) => setPresetSearch(e.target.value)}
-                  placeholder="Search presets"
-                  className="w-full bg-bg-soft border border-transparent rounded-lg pl-7 pr-2 py-1.5 text-[11px] placeholder:text-text-subtle focus:outline-none focus:bg-white focus:border-select-blue/30"
-                />
-              </div>
-            </div>
+      <div className="px-6 py-5 flex-1 min-h-0 overflow-hidden flex flex-col gap-5">
+        {/* ── Presets: horizontal scrolling tab bar ─────────────────────── */}
+        <div className="shrink-0 bg-white rounded-2xl border border-bordergray shadow-[0_1px_3px_rgba(15,23,42,0.04)] p-2 flex items-center gap-2">
+          <div className="flex items-center gap-1.5 pl-2 pr-1 shrink-0">
+            <Layers size={13} className="text-select-blue" />
+            <h3 className="hidden sm:block text-[11px] font-bold uppercase tracking-wider text-textcolor">
+              Presets
+            </h3>
+            <span className="text-[10px] font-semibold text-text-muted bg-bg-soft px-1.5 py-0.5 rounded-md">
+              {presetKeys.length}
+            </span>
+          </div>
 
-            <div className="p-2 max-h-[55vh] overflow-y-auto scroll-hidden-bar">
-              {filteredKeys.length === 0 ? (
-                <p className="text-[11px] text-text-subtle text-center py-4">
-                  No matches
-                </p>
-              ) : (
-                filteredKeys.map((k) => {
+          {/* Tabs — scroll sideways with the scrollbar hidden */}
+          <div className="flex-1 min-w-0 overflow-x-auto scroll-hidden-bar">
+            {filteredKeys.length === 0 ? (
+              <p className="text-[11px] text-text-subtle px-2 py-1.5">
+                No matches
+              </p>
+            ) : (
+              <div className="flex items-center gap-1.5 w-max">
+                {filteredKeys.map((k) => {
                   const p = master[k];
                   const allCfgItems = (p.configurations || []).flatMap(
                     (c) => c.scopeItems || [],
@@ -1056,107 +999,99 @@ const ProposalMaster = () => {
                   const isActive = k === activeKey;
                   const cat = getCategory(p.label || k);
                   const c = COLOR_MAP[cat.color];
+                  const typeCount = (p.configurations || []).length;
                   return (
                     <button
                       key={k}
                       type="button"
                       onClick={() => setActiveKey(k)}
-                      className={`w-full text-left rounded-xl px-3 py-2.5 mb-1 transition-all border ${
+                      title={`${p.label} · ${formatAmount(t.grandTotal)}${firstCfg?.sizeRange ? ` · ${formatSizeRange(firstCfg.sizeRange)}` : ""}`}
+                      className={`flex items-center gap-2 whitespace-nowrap rounded-xl px-3 py-2 border transition-all ${
                         isActive
                           ? "bg-active-bg border-select-blue/40 shadow-[0_1px_3px_rgba(30,58,138,0.08)]"
                           : "bg-transparent border-transparent hover:bg-bg-soft"
                       }`}
                     >
-                      <div className="flex items-center justify-between gap-2 mb-1">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span
-                            className={`h-2 w-2 rounded-full shrink-0 ${c.dot}`}
-                          />
-                          <span
-                            className={`text-[12px] font-bold truncate ${isActive ? "text-select-blue" : "text-textcolor"}`}
-                          >
-                            {k}
-                          </span>
-                        </div>
-                        <span className="text-[10px] font-semibold text-text-muted bg-white/70 px-1.5 py-0.5 rounded-md border border-bordergray">
-                          {(p.configurations || []).length} type
-                          {(p.configurations || []).length === 1 ? "" : "s"}
-                        </span>
-                      </div>
-                      <p className="text-[10.5px] text-text-muted truncate ml-4">
-                        {p.label}
-                      </p>
-                      <div className="flex items-center justify-between gap-2 mt-1.5 ml-4">
-                        <p
-                          className={`text-[10.5px] font-bold tabular-nums ${isActive ? "text-select-blue" : "text-textcolor"}`}
-                        >
-                          {formatAmount(t.grandTotal)}
-                        </p>
-                        {firstCfg?.sizeRange && (
-                          <span className="text-[9.5px] text-text-subtle truncate">
-                            {formatSizeRange(firstCfg.sizeRange)}
-                          </span>
-                        )}
-                      </div>
+                      <span className={`h-2 w-2 rounded-full shrink-0 ${c.dot}`} />
+                      <span
+                        className={`text-[12px] font-bold ${isActive ? "text-select-blue" : "text-textcolor"}`}
+                      >
+                        {k}
+                      </span>
+                      <span className="text-[10px] font-semibold text-text-muted bg-white/70 px-1.5 py-0.5 rounded-md border border-bordergray">
+                        {typeCount} type{typeCount === 1 ? "" : "s"}
+                      </span>
                     </button>
                   );
-                })
-              )}
-            </div>
+                })}
+              </div>
+            )}
+          </div>
 
-            <div className="p-3 border-t border-bordergray">
-              {showAddPreset ? (
-                <div className="space-y-2">
-                  <input
-                    type="text"
-                    value={newPresetKey}
-                    onChange={(e) => setNewPresetKey(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleAddPreset();
-                      if (e.key === "Escape") {
-                        setShowAddPreset(false);
-                        setNewPresetKey("");
-                      }
-                    }}
-                    placeholder="e.g. Studio"
-                    className="w-full bg-white border border-bordergray rounded-lg text-[12px] px-2.5 py-2 focus:outline-none focus:border-select-blue"
-                    autoFocus
-                  />
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={handleAddPreset}
-                      className="flex-1 px-2.5 py-1.5 rounded-lg bg-select-blue text-white text-[11px] font-semibold hover:bg-primary"
-                    >
-                      Create
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowAddPreset(false);
-                        setNewPresetKey("");
-                      }}
-                      className="px-2.5 py-1.5 rounded-lg border border-bordergray text-[11px] text-text-muted hover:bg-bg-soft"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                  <p className="text-[10px] text-text-subtle">
-                    Tip: short keys like "1BHK", "Studio", "Penthouse".
-                  </p>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setShowAddPreset(true)}
-                  className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-dashed border-bordergray text-[11.5px] font-semibold text-text-muted hover:border-select-blue hover:text-select-blue hover:bg-active-bg/40 transition-all"
-                >
-                  <Plus size={13} /> New Preset
-                </button>
-              )}
-            </div>
-          </aside>
+          {/* Search */}
+          <div className="relative shrink-0 hidden md:block">
+            <Search
+              size={12}
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-subtle"
+            />
+            <input
+              type="text"
+              value={presetSearch}
+              onChange={(e) => setPresetSearch(e.target.value)}
+              placeholder="Search presets"
+              className="w-[150px] bg-bg-soft border border-transparent rounded-lg pl-7 pr-2 py-1.5 text-[11px] placeholder:text-text-subtle focus:outline-none focus:bg-white focus:border-select-blue/30"
+            />
+          </div>
 
+          {/* Add preset — pinned to the right end */}
+          {showAddPreset ? (
+            <div className="flex items-center gap-1.5 shrink-0">
+              <input
+                type="text"
+                value={newPresetKey}
+                onChange={(e) => setNewPresetKey(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleAddPreset();
+                  if (e.key === "Escape") {
+                    setShowAddPreset(false);
+                    setNewPresetKey("");
+                  }
+                }}
+                placeholder="e.g. Studio"
+                className="w-[120px] bg-white border border-bordergray rounded-lg text-[12px] px-2.5 py-2 focus:outline-none focus:border-select-blue"
+                autoFocus
+              />
+              <button
+                type="button"
+                onClick={handleAddPreset}
+                className="px-2.5 py-2 rounded-lg bg-select-blue text-white text-[11px] font-semibold hover:bg-primary"
+              >
+                Create
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAddPreset(false);
+                  setNewPresetKey("");
+                }}
+                className="px-2.5 py-2 rounded-lg border border-bordergray text-[11px] text-text-muted hover:bg-bg-soft"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowAddPreset(true)}
+              className="shrink-0 flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg bg-select-blue text-white text-[11.5px] font-semibold shadow-sm hover:bg-primary transition-all"
+            >
+              <Plus size={13} /> Add Preset
+            </button>
+          )}
+        </div>
+
+        {/* ── Editor + right panel ──────────────────────────────────────── */}
+        <div className="grid grid-cols-1 gap-5 items-stretch flex-1 min-h-0 overflow-hidden">
           {/* ── Middle: Editor ──────────────────────────────────────────── */}
           <main className="space-y-5 min-w-0 overflow-y-auto pb-28 scroll-hidden-bar">
             {/* Preset hero card */}
@@ -1702,7 +1637,17 @@ const ProposalMaster = () => {
                         </span>
                       </button>
                       {groupOpen && (
-                        <div className="space-y-3">
+                        <div className="rounded-xl border border-bordergray overflow-hidden divide-y divide-bordergray">
+                          {/* Column header — one per room */}
+                          <div className="grid grid-cols-[minmax(0,1fr)_92px_104px_88px_64px_132px_56px] gap-2 px-3 py-2 bg-bg-soft/60 text-[9px] font-bold uppercase tracking-wider text-text-muted">
+                            <span>Item</span>
+                            <span>Unit</span>
+                            <span>Rate/Sqft (₹)</span>
+                            <span className="text-right">Qty</span>
+                            <span className="text-center">Days</span>
+                            <span className="text-right">Amount</span>
+                            <span />
+                          </div>
                           {group.rows.map(({ item, idx }) => {
                             const isOpen = !!expanded[idx];
                             const matCount = (item.materials || []).length;
@@ -1714,271 +1659,243 @@ const ProposalMaster = () => {
                               totals.subtotal > 0
                                 ? Math.round((amount / totals.subtotal) * 100)
                                 : 0;
-                            const barWidth =
-                              maxScope > 0 ? (amount / maxScope) * 100 : 0;
+                            const split =
+                              activeConfig?.roomAllocations?.[scopeRoomKey(item)];
+                            const unitLabel =
+                              UNITS.find(
+                                (u) => u.code === (item.unit || "sqft"),
+                              )?.label ||
+                              item.unit ||
+                              "—";
+                            // Price each material from the linked rate build-up
+                            // recipe so amounts match the Item Master build-up.
+                            const matLib = item.masterId
+                              ? libById[item.masterId]
+                              : null;
+                            const matGrade =
+                              item.grade ||
+                              activeConfig?.grade ||
+                              activeGrade ||
+                              "economy";
+                            const recipeLines = (
+                              matLib?.recipes?.[matGrade] ||
+                              item.recipes?.[matGrade]
+                            )
+                              ? computeRecipe(
+                                  matLib?.recipes?.[matGrade] ||
+                                    item.recipes?.[matGrade],
+                                  matById,
+                                ).lines
+                              : [];
+                            // Use the exact per-material amount from the rate
+                            // build-up (same `line.amount` the Item Master work
+                            // item modal shows). Fall back to the stored build-up
+                            // fields only when no recipe line exists.
+                            const materialAmount = (m, mIdx) => {
+                              const line =
+                                recipeLines.find(
+                                  (l) =>
+                                    (m.materialId &&
+                                      l.materialId === m.materialId) ||
+                                    (m.id && l.materialId === m.id) ||
+                                    (l.name &&
+                                      m.name &&
+                                      l.name.toLowerCase() ===
+                                        m.name.toLowerCase()),
+                                ) || recipeLines[mIdx];
+                              if (line) return Number(line.amount) || 0;
+                              return (
+                                (Number(m.rate) || 0) *
+                                (Number(m.qty) || 0) *
+                                (1 + (Number(m.wastagePct) || 0) / 100)
+                              );
+                            };
                             return (
-                              <div
-                                key={idx}
-                                className="rounded-xl border border-bordergray bg-white hover:border-select-blue/40 hover:shadow-[0_2px_8px_rgba(15,23,42,0.06)] transition-all group"
-                              >
-                                {/* Two lines instead of one rigid 7-column row — the
-                                    middle column (between the preset rail and the
-                                    right sidebar) isn't wide enough for grip+icon+
-                                    room+description+days+amount+remove on one line,
-                                    which forced a horizontal scrollbar. Identity
-                                    (room/description) on line 1, values (days/amount)
-                                    on line 2 — always fits, never scrolls sideways. */}
-                                <div className="p-3 space-y-2">
-                                  <div className="flex items-center gap-2">
-                                    <button
-                                      type="button"
-                                      className="h-6 w-5 flex items-center justify-center text-text-subtle opacity-0 group-hover:opacity-100 cursor-grab shrink-0"
-                                      title="Drag to reorder (coming soon)"
-                                    >
-                                      <GripVertical size={12} />
-                                    </button>
+                              <div key={idx} className="group bg-white">
+                                {/* Read-only row — every field is display-only; edit
+                                    only via the item name or the pencil (Edit Scope). */}
+                                <div className="grid grid-cols-[minmax(0,1fr)_92px_104px_88px_64px_132px_56px] gap-2 px-3 py-2 items-center hover:bg-bg-soft/30 transition-colors">
+                                  {/* ITEM */}
+                                  <div className="flex items-center gap-2 min-w-0">
                                     <span
                                       className={`h-7 w-7 flex items-center justify-center rounded-lg shrink-0 ${c.bg} ${c.text}`}
                                     >
                                       <Icon size={13} />
                                     </span>
+                                    <div className="min-w-0 flex-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => openEditScope(idx)}
+                                        title="Click to edit this scope"
+                                        className="block max-w-full truncate text-left text-[12px] font-semibold text-textcolor hover:text-select-blue hover:underline"
+                                      >
+                                        {namedOriginalItems[idx]
+                                          ?._displayCategory ||
+                                          item.itemName ||
+                                          item.area || (
+                                            <span className="text-text-subtle font-normal italic no-underline">
+                                              Untitled scope
+                                            </span>
+                                          )}
+                                      </button>
+                                      {item.description && (
+                                        <span className="block text-[10.5px] text-text-muted truncate">
+                                          {item.description}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {/* UNIT */}
+                                  <span
+                                    className="text-[11px] text-textcolor truncate"
+                                    title={unitLabel}
+                                  >
+                                    {unitLabel}
+                                  </span>
+                                  {/* RATE */}
+                                  <span className="text-[11px] text-textcolor tabular-nums">
+                                    ₹
+                                    {Number(item.rate || 0).toLocaleString(
+                                      "en-IN",
+                                    )}
+                                  </span>
+                                  {/* QTY — calculated */}
+                                  <div
+                                    className="px-1 text-right tabular-nums leading-tight"
+                                    title={
+                                      split != null
+                                        ? `Calculated quantity · ${split}% area split`
+                                        : "Calculated quantity"
+                                    }
+                                  >
+                                    <span className="block text-[11px] font-semibold text-textcolor">
+                                      {Number(item.qty || 0).toLocaleString(
+                                        "en-IN",
+                                        { maximumFractionDigits: 2 },
+                                      ) || "—"}
+                                    </span>
+                                    <span className="block text-[9px] text-text-subtle">
+                                      {item.unit || ""}
+                                      {split != null ? ` · ${split}%` : ""}
+                                    </span>
+                                  </div>
+                                  {/* DAYS */}
+                                  <span
+                                    className="text-[11px] text-textcolor tabular-nums text-center"
+                                    title="Default duration in days — seeds the project schedule"
+                                  >
+                                    {(item.days ?? "") !== ""
+                                      ? `${item.days} d`
+                                      : "—"}
+                                  </span>
+                                  {/* AMOUNT */}
+                                  <div className="text-right leading-tight">
+                                    <span className="block text-[12px] font-bold text-textcolor tabular-nums">
+                                      {formatAmount(amount)}
+                                    </span>
+                                    {pct > 0 && (
+                                      <span className="block text-[9px] font-semibold text-text-subtle tabular-nums">
+                                        {pct}%
+                                      </span>
+                                    )}
+                                  </div>
+                                  {/* ACTIONS — view materials · edit · remove */}
+                                  <div className="flex items-center justify-end gap-0.5">
                                     <button
                                       type="button"
-                                      onClick={() => openEditScope(idx)}
-                                      title="Click to edit this scope"
-                                      className="text-[12px] font-semibold text-textcolor px-1 py-2 truncate text-left hover:text-select-blue hover:underline shrink-0 max-w-[120px]"
+                                      onClick={() => toggleExpanded(idx)}
+                                      title="Materials & specifications"
+                                      className="relative h-6 w-6 flex items-center justify-center rounded-md text-text-muted hover:text-select-blue hover:bg-bg-soft"
                                     >
-                                      {namedOriginalItems[idx]
-                                        ?._displayCategory ||
-                                        item.area || (
-                                          <span className="text-text-subtle font-normal italic no-underline">
-                                            No room
-                                          </span>
-                                        )}
+                                      {isOpen ? (
+                                        <ChevronDown size={13} />
+                                      ) : (
+                                        <ChevronRight size={13} />
+                                      )}
+                                      {matCount > 0 && !isOpen && (
+                                        <span className="absolute -top-1 -right-1 h-3.5 min-w-[14px] px-0.5 flex items-center justify-center text-[8px] font-bold text-white bg-select-blue rounded-full">
+                                          {matCount}
+                                        </span>
+                                      )}
                                     </button>
-                                    <textarea
-                                      value={item.description || ""}
-                                      onChange={(e) =>
-                                        updateScope(
-                                          idx,
-                                          "description",
-                                          e.target.value,
-                                        )
-                                      }
-                                      placeholder="Description"
-                                      className={`${inputBase} min-w-0 flex-1 resize-none`}
-                                        rows={1}
-                                     />
-                                    <div className="w-36 shrink-0">
-                                      <AmountInput
-                                        value={item.amount}
-                                        onChange={(v) =>
-                                          updateScope(idx, "amount", v)
-                                        }
-                                        pct={pct}
-                                      />
-                                    </div>
                                     <button
                                       type="button"
                                       onClick={() => removeScopeRow(idx)}
-                                      className="h-7 w-7 flex items-center justify-center rounded-md text-text-subtle hover:text-red-500 hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
                                       title="Remove row"
+                                      className="h-6 w-6 flex items-center justify-center rounded-md text-text-subtle hover:text-red-500 hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100"
                                     >
                                       <Trash2 size={13} />
                                     </button>
                                   </div>
-                                  <div className="space-y-2">
-                                    <div className="grid grid-cols-[1.6fr_1.2fr_92px] gap-3 items-end">
-                                      {/* UNIT */}
-                                      <div>
-                                        <label className="block text-[9px] font-semibold uppercase tracking-wider text-text-muted mb-1">
-                                          Unit
-                                        </label>
-                                        <select
-                                          value={item.unit || "sqft"}
-                                          onChange={(e) =>
-                                            updateScope(idx, "unit", e.target.value)
-                                          }
-                                          className={`${inputBase} cursor-pointer`}
-                                        >
-                                          {UNITS.map((u) => (
-                                            <option key={u.code} value={u.code}>
-                                              {u.label}
-                                            </option>
-                                          ))}
-                                        </select>
-                                      </div>
-                                      {/* RATE */}
-                                      <div>
-                                        <label className="block text-[9px] font-semibold uppercase tracking-wider text-text-muted mb-1">
-                                          Rate (₹)
-                                        </label>
-                                        <div className="relative">
-                                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-subtle text-[11px] pointer-events-none">
-                                            ₹
-                                          </span>
-                                          <input
-                                            type="number"
-                                            min={0}
-                                            value={item.rate ?? ""}
-                                            onChange={(e) =>
-                                              updateScope(idx, "rate", e.target.value)
-                                            }
-                                            placeholder="Rate"
-                                            className={`${inputBase} pl-6 tabular-nums`}
-                                          />
-                                        </div>
-                                      </div>
-                                      {/* DAYS */}
-                                      <div
-                                        title="Default duration in days — seeds the project schedule"
-                                      >
-                                        <label className="block text-[9px] font-semibold uppercase tracking-wider text-text-muted mb-1">
-                                          Days
-                                        </label>
-                                        <div className="relative">
-                                          <input
-                                            type="number"
-                                            min={0}
-                                            value={item.days ?? ""}
-                                            onChange={(e) =>
-                                              updateScope(idx, "days", e.target.value)
-                                            }
-                                            placeholder="Days"
-                                            className={`${inputBase} pr-7 text-center tabular-nums`}
-                                          />
-                                          <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-text-subtle pointer-events-none">
-                                            d
-                                          </span>
-                                        </div>
-                                      </div>
-                                    </div>
-                                    {activeConfig?.enableFormulaEstimator && (
-                                      <div className="flex items-center justify-between rounded-lg bg-bg-soft/60 border border-bordergray/60 px-3 py-1.5">
-                                        <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
-                                          Calculated Quantity
-                                        </span>
-                                        <span className="text-[11px] font-bold text-textcolor tabular-nums">
-                                          {Number(item.qty || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })} {item.unit || "unit"}
-                                          {(() => {
-                                            const split =
-                                              activeConfig?.roomAllocations?.[
-                                                scopeRoomKey(item)
-                                              ];
-                                            return split != null ? (
-                                              <span className="ml-1.5 text-[9.5px] font-normal text-text-subtle">
-                                                ({split}% split)
-                                              </span>
-                                            ) : null;
-                                          })()}
-                                        </span>
-                                      </div>
-                                    )}
-                                  </div>
                                 </div>
 
-                                <div className="px-3 pb-2">
-                                  <div className="h-1 w-full bg-bg-soft rounded-full overflow-hidden">
-                                    <div
-                                      className={`h-full ${c.bar} transition-all`}
-                                      style={{ width: `${barWidth}%` }}
-                                    />
-                                  </div>
-                                </div>
-
-                                <div className="border-t border-bordergray bg-bg-soft/40">
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleExpanded(idx)}
-                                    className="w-full flex items-center justify-between px-4 py-2 text-[11px] font-semibold text-text-muted hover:text-select-blue"
-                                  >
-                                    <span className="flex items-center gap-1.5">
-                                      {isOpen ? (
-                                        <ChevronDown size={12} />
-                                      ) : (
-                                        <ChevronRight size={12} />
-                                      )}
-                                      Materials & Specifications
+                                {/* Read-only Materials & Specifications */}
+                                {isOpen && (
+                                  <div className="border-t border-bordergray bg-bg-soft/40 px-3 py-3">
+                                    <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-text-muted mb-2">
+                                      <Package
+                                        size={11}
+                                        className="text-select-blue"
+                                      />
+                                      Materials &amp; Specifications
                                       {matCount > 0 && (
-                                        <span className="ml-1 text-[10px] font-bold text-select-blue bg-white px-1.5 py-0.5 rounded-md border border-bordergray">
-                                          {matCount}
+                                        <span className="text-[9.5px] font-semibold text-text-subtle normal-case tracking-normal">
+                                          ({matCount})
                                         </span>
                                       )}
-                                    </span>
-                                    {!isOpen && matCount > 0 && (
-                                      <span className="text-[10px] text-text-subtle truncate max-w-[60%]">
-                                        {item.materials
-                                          .map((m) => m.name)
-                                          .filter(Boolean)
-                                          .join(", ")}
-                                      </span>
-                                    )}
-                                    {isOpen && (
-                                      <span className="text-[10px] text-text-subtle">
-                                        Hide
-                                      </span>
-                                    )}
-                                  </button>
-
-                                  {isOpen && (
-                                    <div className="px-4 pb-3 space-y-1.5">
-                                      {(item.materials || []).map((m, mIdx) => (
-                                        <div
-                                          key={mIdx}
-                                          className="grid grid-cols-[130px_1fr_24px] gap-2 items-center"
-                                        >
-                                          <textarea
-                                            value={m.name}
-                                            onChange={(e) =>
-                                              updateMaterial(
-                                                idx,
-                                                mIdx,
-                                                "name",
-                                                e.target.value,
-                                              )
-                                            }
-                                            placeholder="Plywood"
-                                            className={`${inputBase} py-1.5 text-[11px] resize-none`}
-                                            rows={1}
-                                          />
-                                          <textarea
-                                            value={m.spec}
-                                            onChange={(e) =>
-                                              updateMaterial(
-                                                idx,
-                                                mIdx,
-                                                "spec",
-                                                e.target.value,
-                                              )
-                                            }
-                                            placeholder="BWP 19mm"
-                                            className={`${inputBase} py-1.5 text-[11px] resize-none`}
-                                            rows={1}
-                                          />
-                                          <button
-                                            type="button"
-                                            onClick={() =>
-                                              removeMaterial(idx, mIdx)
-                                            }
-                                            className="h-7 w-6 flex items-center justify-center rounded-md text-text-subtle hover:text-red-500 hover:bg-red-50"
-                                            title="Remove material"
-                                          >
-                                            <Trash2 size={11} />
-                                          </button>
+                                    </p>
+                                    {matCount === 0 ? (
+                                      <p className="text-[10.5px] text-text-subtle">
+                                        No materials. Use Edit Scope to add them.
+                                      </p>
+                                    ) : (
+                                      <div className="space-y-1.5">
+                                        <div className="grid grid-cols-[160px_1fr_104px_28px] gap-2 px-2.5 text-[9px] font-bold uppercase tracking-wider text-text-subtle">
+                                          <span>Material</span>
+                                          <span>Specification</span>
+                                          <span className="text-right">Amount</span>
+                                          <span />
                                         </div>
-                                      ))}
-                                      <div className="flex items-center gap-3 mt-1.5">
-                                        <button
-                                          type="button"
-                                          onClick={() => addMaterial(idx)}
-                                          className="flex items-center gap-1 text-[11px] font-semibold text-select-blue hover:text-primary"
-                                        >
-                                          <Plus size={11} /> Add Material
-                                        </button>
+                                        {(item.materials || []).map((m, mIdx) => {
+                                          const matAmount = materialAmount(m, mIdx);
+                                          return (
+                                            <div
+                                              key={mIdx}
+                                              className="grid grid-cols-[160px_1fr_104px_28px] gap-2 items-stretch"
+                                            >
+                                              <div className="bg-white border border-bordergray rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-textcolor truncate">
+                                                {m.name || "—"}
+                                              </div>
+                                              <div className="bg-white border border-bordergray rounded-lg px-2.5 py-1.5 text-[11px] text-text-muted truncate">
+                                                {m.spec || "—"}
+                                              </div>
+                                              <div
+                                                className="bg-white border border-bordergray rounded-lg px-2.5 py-1.5 text-[11px] font-semibold text-textcolor tabular-nums text-right truncate"
+                                                title="Material amount from the rate build-up"
+                                              >
+                                                {matAmount > 0
+                                                  ? `₹${Math.round(
+                                                      matAmount,
+                                                    ).toLocaleString("en-IN")}`
+                                                  : "—"}
+                                              </div>
+                                              <button
+                                                type="button"
+                                                onClick={() =>
+                                                  removeMaterial(idx, mIdx)
+                                                }
+                                                title="Remove material"
+                                                className="h-7 w-7 flex items-center justify-center rounded-md text-text-subtle hover:text-red-500 hover:bg-red-50 transition-colors"
+                                              >
+                                                <Trash2 size={12} />
+                                              </button>
+                                            </div>
+                                          );
+                                        })}
                                       </div>
-                                    </div>
-                                  )}
-                                </div>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             );
                           })}
@@ -2017,10 +1934,8 @@ const ProposalMaster = () => {
                 )}
               </div>
             </section>
-          </main>
 
-          {/* ── Right: Stats + Inclusions / Exclusions ──────────────────── */}
-          <aside className="space-y-5 min-w-0 overflow-y-auto pb-28">
+            {/* ── Cost Breakdown — positioned below Scope of Work ───────── */}
             <section className="bg-white rounded-2xl border border-bordergray shadow-[0_1px_3px_rgba(15,23,42,0.04)] overflow-hidden">
               <div className="px-4 py-3 border-b border-bordergray flex items-center justify-between gap-2">
                 <span className="flex items-center gap-2">
@@ -2033,73 +1948,90 @@ const ProposalMaster = () => {
                   {scopeItems.length} scope{scopeItems.length === 1 ? "" : "s"}
                 </span>
               </div>
-              <div className="p-4 space-y-3 overflow-y-auto max-h-[calc(100vh-260px)]">
+              <div className="p-4">
                 {scopeItems.length === 0 ? (
                   <p className="text-[11px] text-text-subtle text-center py-2">
                     Add scope items to see distribution
                   </p>
                 ) : (
-                  scopeItems
-                    .map((item, idx) => {
-                      const amount = Number(item.amount) || 0;
-                      const pct =
-                        totals.subtotal > 0
-                          ? Math.round((amount / totals.subtotal) * 100)
-                          : 0;
-                      const cat = getCategory(item.area);
-                      const c = COLOR_MAP[cat.color];
-                      const displayItem = namedOriginalItems[idx] || item;
-                      const title =
-                        displayItem._displayCategory ||
-                        item.itemName ||
-                        item.description ||
-                        item.area ||
-                        "Untitled scope";
-                      const subtitle =
-                        item.area && title !== item.area
-                          ? item.area
-                          : item.description && title !== item.description
-                            ? item.description
-                            : "";
-                      return { item, idx, amount, pct, c, title, subtitle };
-                    })
-                    .map(({ idx, amount, pct, c, title, subtitle }) => (
-                      <div key={idx}>
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="flex items-center gap-1.5 min-w-0">
-                            <span className={`h-2 w-2 rounded-full ${c.dot}`} />
-                            <span className="min-w-0">
-                              <span className="block text-[11px] text-textcolor truncate font-medium">
-                                {title}
-                              </span>
-                              {subtitle && (
-                                <span className="block text-[9.5px] text-text-subtle truncate">
-                                  {subtitle}
+                  (() => {
+                    // Bars scale to the biggest line item so the progress is
+                    // readable; the % shown is share of the project subtotal.
+                    const maxAmt = Math.max(
+                      1,
+                      ...scopeItems.map((s) => Number(s.amount) || 0),
+                    );
+                    const cards = scopeItems
+                      .map((item, idx) => {
+                        const amount = Number(item.amount) || 0;
+                        const pct =
+                          totals.subtotal > 0
+                            ? Math.round((amount / totals.subtotal) * 100)
+                            : 0;
+                        const cat = getCategory(item.area);
+                        const c = COLOR_MAP[cat.color];
+                        const displayItem = namedOriginalItems[idx] || item;
+                        const title =
+                          displayItem._displayCategory ||
+                          item.itemName ||
+                          item.description ||
+                          item.area ||
+                          "Untitled scope";
+                        const subtitle =
+                          item.area && title !== item.area
+                            ? item.area
+                            : item.description && title !== item.description
+                              ? item.description
+                              : "";
+                        return { idx, amount, pct, c, title, subtitle };
+                      })
+                      .sort((a, b) => b.amount - a.amount);
+
+                    return (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                        {cards.map(({ idx, amount, pct, c, title, subtitle }) => (
+                          <div
+                            key={idx}
+                            className="rounded-xl border border-bordergray bg-white p-3 hover:border-select-blue/40 hover:shadow-[0_2px_8px_rgba(15,23,42,0.06)] transition-all"
+                          >
+                            <div className="flex items-start justify-between gap-2 mb-2">
+                              <span className="flex items-start gap-1.5 min-w-0">
+                                <span
+                                  className={`h-2 w-2 rounded-full shrink-0 mt-1 ${c.dot}`}
+                                />
+                                <span className="min-w-0">
+                                  <span className="block text-[11px] font-semibold text-textcolor truncate">
+                                    {title}
+                                  </span>
+                                  {subtitle && (
+                                    <span className="block text-[9.5px] text-text-subtle uppercase tracking-wide truncate">
+                                      {subtitle}
+                                    </span>
+                                  )}
                                 </span>
-                              )}
-                            </span>
-                          </span>
-                          <span className="text-[10.5px] font-bold text-text-muted tabular-nums">
-                            {pct}%
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1 h-1.5 bg-bg-soft rounded-full overflow-hidden">
-                            <div
-                              className={`h-full ${c.bar}`}
-                              style={{ width: `${pct}%` }}
-                            />
+                              </span>
+                              <span className="shrink-0 text-[10px] font-bold text-select-blue bg-active-bg px-1.5 py-0.5 rounded-md tabular-nums">
+                                {pct}%
+                              </span>
+                            </div>
+                            <p className="text-[14px] font-bold text-textcolor tabular-nums leading-none mb-2">
+                              {formatAmount(amount)}
+                            </p>
+                            <div className="h-1.5 bg-bg-soft rounded-full overflow-hidden">
+                              <div
+                                className={`h-full ${c.bar} transition-all`}
+                                style={{ width: `${(amount / maxAmt) * 100}%` }}
+                              />
+                            </div>
                           </div>
-                          <span className="text-[10px] font-semibold text-text-subtle tabular-nums w-14 text-right">
-                            {formatAmount(amount)}
-                          </span>
-                        </div>
+                        ))}
                       </div>
-                    ))
+                    );
+                  })()
                 )}
               </div>
             </section>
-          </aside>
+          </main>
         </div>
       </div>
 
@@ -2659,41 +2591,6 @@ const AddTypeModal = ({
 
 // Number input that hides "0" so users don't have to delete it before typing,
 // and shows the cost-share % suffix when meaningful.
-const AmountInput = ({ value, onChange, pct }) => {
-  const [focused, setFocused] = useState(false);
-  const display = focused
-    ? value === 0 || value === "0"
-      ? ""
-      : value
-    : value === 0 || value === "0" || value === ""
-      ? ""
-      : value;
-  return (
-    <div className="relative">
-      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-subtle text-[11px]">
-        ₹
-      </span>
-      <input
-        type="number"
-        value={display}
-        onFocus={(e) => {
-          setFocused(true);
-          e.target.select();
-        }}
-        onBlur={() => setFocused(false)}
-        onChange={(e) => onChange(e.target.value === "" ? 0 : e.target.value)}
-        placeholder="0"
-        className={`${inputBase} pl-6 pr-10 text-right tabular-nums font-semibold`}
-      />
-      {pct > 0 && !focused && (
-        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-bold text-text-subtle tabular-nums">
-          {pct}%
-        </span>
-      )}
-    </div>
-  );
-};
-
 const Field = ({ icon, label, hint, children }) => (
   <div>
     <label className="flex items-center justify-between text-[10.5px] font-semibold uppercase tracking-wider text-text-muted mb-1.5">
@@ -2711,29 +2608,30 @@ const Field = ({ icon, label, hint, children }) => (
   </div>
 );
 
-const BentoStat = ({ icon, label, value, tint }) => {
-  const tints = {
-    blue: "from-blue-50 to-white text-blue-600 border-blue-100",
-    purple: "from-purple-50 to-white text-purple-600 border-purple-100",
-    orange: "from-orange-50 to-white text-orange-600 border-orange-100",
-    emerald: "from-emerald-50 to-white text-emerald-600 border-emerald-100",
-  };
-  return (
-    <div
-      className={`relative bg-linear-to-br ${tints[tint]} border rounded-xl p-3 overflow-hidden`}
-    >
-      <div className="flex items-center justify-between mb-1">
-        <span className="opacity-80">{icon}</span>
-        <span className="text-[9.5px] font-bold uppercase tracking-wider opacity-70">
-          {label}
-        </span>
-      </div>
-      <p className="text-[18px] font-bold text-textcolor tabular-nums leading-tight">
-        {value}
-      </p>
-    </div>
-  );
-};
+// Stats banner hidden per request — kept for future use.
+// const BentoStat = ({ icon, label, value, tint }) => {
+//   const tints = {
+//     blue: "from-blue-50 to-white text-blue-600 border-blue-100",
+//     purple: "from-purple-50 to-white text-purple-600 border-purple-100",
+//     orange: "from-orange-50 to-white text-orange-600 border-orange-100",
+//     emerald: "from-emerald-50 to-white text-emerald-600 border-emerald-100",
+//   };
+//   return (
+//     <div
+//       className={`relative bg-linear-to-br ${tints[tint]} border rounded-xl p-3 overflow-hidden`}
+//     >
+//       <div className="flex items-center justify-between mb-1">
+//         <span className="opacity-80">{icon}</span>
+//         <span className="text-[9.5px] font-bold uppercase tracking-wider opacity-70">
+//           {label}
+//         </span>
+//       </div>
+//       <p className="text-[18px] font-bold text-textcolor tabular-nums leading-tight">
+//         {value}
+//       </p>
+//     </div>
+//   );
+// };
 
 const FooterStat = ({ label, value, accent = "text-textcolor" }) => (
   <div className="flex flex-col">

@@ -64,6 +64,41 @@ export const mapScopeItemsToGrade = (scopeItems = [], grade = "economy") => {
   );
 };
 
+// Pull the non-grade descriptive fields (work name, spec, HSN, unit, GST, days)
+// of each proposal row from its linked Item Master item, so edits made in Item
+// Master flow into existing scopes in the Scope of Work. Rate, materials and
+// amount are handled separately by the grade mapping (mapScopeItemsToGrade), so
+// they're intentionally left untouched here. A row whose spec has been hand-
+// edited (isDescriptionCustom) keeps its custom text; everything else tracks the
+// master. Rows with no library match are returned unchanged.
+export const syncScopeItemsToLibrary = (scopeItems = [], opts = {}) => {
+  const library = opts.library || listLibrary();
+  return scopeItems.map((scope) => {
+    const lib = findLibraryItem(scope, library);
+    if (!lib) return scope;
+    const next = {
+      ...scope,
+      masterId: scope.masterId || lib.id,
+      // A row whose name was hand-edited keeps it; everything else tracks master.
+      itemName: scope.isItemNameCustom
+        ? scope.itemName
+        : (lib.description ?? lib.itemName ?? scope.itemName),
+      hsn: lib.hsn ?? scope.hsn,
+      unit: lib.unit || scope.unit,
+      gstPercent: lib.gstPercent ?? scope.gstPercent,
+      days: lib.days ?? scope.days,
+    };
+    // Only refresh the spec/description when the row hasn't been hand-edited and
+    // the master carries an explicit spec — so per-scope wording isn't clobbered
+    // and we never overwrite a real spec with the bare item name.
+    if (!scope.isDescriptionCustom && lib.spec) {
+      next.spec = lib.spec;
+      next.description = lib.spec;
+    }
+    return next;
+  });
+};
+
 // Whether a scope row carries a usable value for the given grade — i.e. its
 // linked Item Master item (by masterId or name) has a recipe for that grade
 // that computes to a rate > 0. Used by the proposal forms to hide grade

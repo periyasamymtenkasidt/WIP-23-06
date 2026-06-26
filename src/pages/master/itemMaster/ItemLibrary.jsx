@@ -204,7 +204,6 @@ const ItemLibrary = () => {
           onClose={() => setEditing(null)}
           showCategory={false}
           showDimensions={false}
-          showAreaFactor
           rateBuildupMode
           title={editing.id ? "Edit Work Item" : "Add Work Item"}
           submitLabel={editing.id ? "Save Changes" : "Add Item"}

@@ -16,7 +16,6 @@ import { yupResolver } from "@hookform/resolvers/yup";
 import * as yup from "yup";
 import InputField from "./InputField";
 import CategorySelect from "./CategorySelect";
-import { getRoomDefaultDays } from "../data/scheduleConfig";
 import {
   getProposalRoomHeadings,
   getCategoryFromProposalHeading,
@@ -90,7 +89,6 @@ const ItemFormModal = ({
   showCategory = true,
   showDimensions = true,
   showQuantity = false,
-  showAreaFactor = false,
   showTags = true,
   roomCategoryMode = false,
   multiEntryMode = false,
@@ -338,13 +336,10 @@ const ItemFormModal = ({
     rhfSetValue("breadth", libraryItem.breadth || 0, { shouldValidate: true });
     rhfSetValue("height", libraryItem.height || 0, { shouldValidate: true });
     rhfSetValue("qty", libraryItem.qty || 0, { shouldValidate: true });
-    const days = libraryItem.days !== "" && libraryItem.days != null
-      ? libraryItem.days
-      : getRoomDefaultDays(libraryItem.category || resolvedHeadingCategory);
     update({
       unit: libraryItem.unit || "sqft",
       gstPercent: libraryItem.gstPercent || 18,
-      days,
+      days: libraryItem.days ?? "",
       materials: libraryItem.materials ? libraryItem.materials.map((m) => ({ ...m })) : [],
       masterId: libraryItem.id,
     });
@@ -373,7 +368,7 @@ const ItemFormModal = ({
       gstPercent: lib.gstPercent || 18,
       materials: lib.materials ? lib.materials.map((m) => ({ ...m })) : [],
       tags: lib.tags ? [...lib.tags] : [],
-      days: lib.days !== "" && lib.days != null ? lib.days : getRoomDefaultDays(lib.category || ""),
+      days: lib.days ?? "",
     };
   };
 
@@ -1011,15 +1006,7 @@ const ItemFormModal = ({
                   <Label>Room / Category</Label>
                   <CategorySelect
                     value={form.category}
-                    onChange={(v) => {
-                      const d = getRoomDefaultDays(v);
-                      update({
-                        category: v,
-                        ...(form.days === "" || form.days == null
-                          ? { days: d }
-                          : {}),
-                      });
-                    }}
+                    onChange={(v) => update({ category: v })}
                     className={`${inputBase} cursor-pointer`}
                   />
                 </div>
@@ -1049,7 +1036,7 @@ const ItemFormModal = ({
                 />
               </div>
               <div>
-                <Label>GST %</Label>
+                <Label> OUTPUT GST %</Label>
                 <SearchableSelect
                   value={form.gstPercent}
                   onChange={(val) => update({ gstPercent: Number(val) })}
@@ -1096,7 +1083,7 @@ const ItemFormModal = ({
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <Label className="mb-0 flex items-center gap-1">
-                    <Ruler size={11} /> Rate{showAreaFactor ? " & Estimating Factor" : ""}
+                    <Ruler size={11} /> Rate
                   </Label>
                   {rateBuildupMode && (
                     <button
@@ -1118,35 +1105,16 @@ const ItemFormModal = ({
                         title="Computed from the rate build-up"
                       >
                         ₹{(Number(watchedFields.rate) || 0).toLocaleString("en-IN")}
-                        {form.defaultGrade && (
-                          <span className="text-[9px] font-bold uppercase tracking-wider text-select-blue bg-active-bg px-1.5 py-0.5 rounded">
-                            {form.defaultGrade}
-                          </span>
-                        )}
                       </div>
                     </div>
                   ) : (
                     <NumField label={`Rate (₹/${unitLabel})`} value={watchedFields.rate} onChange={(v) => rhfSetValue("rate", v, { shouldValidate: true })} tabular prefix="₹" error={errors.rate?.message} />
-                  )}
-                  {showAreaFactor && (
-                    <NumField
-                      label="Area factor (× area)"
-                      value={form.areaFactor}
-                      onChange={(v) => update({ areaFactor: v })}
-                    />
                   )}
                 </div>
                 {rateBuildupMode && (
                   <p className="mt-1 text-[9.5px] text-text-subtle">
                     Rate is mapped from the Rate Build-up (materials + labour +
                     overhead + margin). Use “Edit Rate Build-up” to change it.
-                  </p>
-                )}
-                {showAreaFactor && (
-                  <p className="mt-1 text-[9.5px] text-text-subtle">
-                    Assumed qty on a quote = package carpet area × this factor (e.g.
-                    flooring 1.0, false ceiling 0.65, wall paint 3.5). For count
-                    (nos) works, this is the default count.
                   </p>
                 )}
               </div>

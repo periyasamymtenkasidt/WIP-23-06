@@ -7,9 +7,9 @@ import {
   Copy,
   ChevronDown,
   ChevronRight,
+  ChevronLeft,
   Layers,
   Package,
-  FileText,
   Search,
   Home,
   Ruler,
@@ -48,7 +48,6 @@ import {
   digitsOnly,
   handleSizeRangeKeyDown,
 } from "../../../utils/sizeRangeValidation";
-import { UNITS } from "../../../data/boqUnits";
 import {
   assignCategoryNames,
   addScopeItemsWithDuplicateCheck,
@@ -102,6 +101,28 @@ const blankPreset = (propertyType = "Apartment") => ({
 
 const inputBase =
   "bg-white border border-bordergray text-[12px] text-textcolor rounded-lg px-3 py-2 w-full focus:outline-none focus:border-select-blue focus:ring-2 focus:ring-select-blue/15 transition-all placeholder:text-text-subtle";
+
+// Per-scope grade chip — shorthand (Economy → EC, Premium → PR, Luxury → LX)
+// shown next to the item name so the grade is identifiable at a glance.
+// Mirrors the shorthand used on the Item Master cards.
+const gradeShorthand = (key) => {
+  const label = gradeLabel(key);
+  if (!label) return "";
+  return label
+    .trim()
+    .split(/\s+/)
+    .slice(0, 3)
+    .map((word) => word.slice(0, 2).toUpperCase())
+    .join("");
+};
+
+const GRADE_CHIP_STYLE = {
+  economy: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  premium: "bg-amber-50 text-amber-700 border-amber-200",
+  luxury: "bg-violet-50 text-violet-700 border-violet-200",
+};
+const gradeChipStyle = (key) =>
+  GRADE_CHIP_STYLE[key] || "bg-active-bg text-select-blue border-select-blue/20";
 
 const CATEGORY_STYLES = {
   kitchen: { color: "orange", icon: ChefHat },
@@ -271,10 +292,15 @@ const ProposalMaster = () => {
   const presetKeys = Object.keys(master);
   const active = master[activeKey];
   const [activeConfigIdx, setActiveConfigIdx] = useState(0);
+  // When false, the editor is collapsed and only the property-type cards show;
+  // clicking a type card opens the editor as a separate view for that type.
+  const [typeEditorOpen, setTypeEditorOpen] = useState(false);
 
-  // Reset config tab when switching presets
+  // Reset config tab + collapse the editor back to type selection when the
+  // preset changes.
   useEffect(() => {
     setActiveConfigIdx(0);
+    setTypeEditorOpen(false);
     setSizeRangeError("");
   }, [activeKey]);
 
@@ -903,73 +929,9 @@ const ProposalMaster = () => {
 
   return (
     <div className="bg-overallbg font-sans h-full overflow-hidden flex flex-col">
-      {/* ── Top header ─────────────────────────────────────────────────── */}
-      <div className="shrink-0 z-30 bg-overallbg/80 backdrop-blur-xl border-b border-bordergray/70">
-        <div className="px-6 py-4 flex justify-between items-center flex-wrap gap-3">
-          <div className="flex items-center gap-3">
-            <div className="relative h-11 w-11 rounded-xl bg-linear-to-br from-select-blue to-primary text-white flex items-center justify-center shadow-lg shadow-select-blue/20">
-              <FileText size={18} />
-              <span className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-emerald-500 ring-2 ring-overallbg" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-[20px] font-bold text-textcolor leading-tight">
-                  Proposal Master
-                </h1>
-                <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  Live
-                </span>
-              </div>
-              <p className="text-[12px] text-text-muted mt-0.5">
-                Quotation templates per property preset · changes apply
-                instantly to new proposals and save automatically
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setShowShortcuts(true)}
-              title="Keyboard shortcuts ( ? )"
-              className="hidden sm:flex items-center gap-1 px-2.5 py-2 bg-white border border-bordergray rounded-lg text-[11px] font-semibold text-text-muted hover:bg-bg-soft hover:text-textcolor transition-all"
-            >
-              <Keyboard size={12} />
-            </button>
-          </div>
-        </div>
-
-        {/* Bento stats banner — hidden per request; keep for future use.
-        <div className="px-6 pb-4 grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <BentoStat
-            icon={<Layers size={13} />}
-            label="Presets"
-            value={globalStats.presets}
-            tint="blue"
-          />
-          <BentoStat
-            icon={<Hash size={13} />}
-            label="Total Scope Items"
-            value={globalStats.items}
-            tint="purple"
-          />
-          <BentoStat
-            icon={<Package size={13} />}
-            label="Material Specs"
-            value={globalStats.materials}
-            tint="orange"
-          />
-          <BentoStat
-            icon={<TrendingUp size={13} />}
-            label="Avg Quote Value"
-            value={formatAmount(globalStats.avgQuote)}
-            tint="emerald"
-          />
-        </div>
-        */}
-      </div>
-
-      <div className="px-6 py-5 flex-1 min-h-0 overflow-hidden flex flex-col gap-5">
-        {/* ── Presets: horizontal scrolling tab bar ─────────────────────── */}
+      <div className="px-6 py-4 flex-1 min-h-0 overflow-hidden flex flex-col gap-4">
+        {/* ── Presets: horizontal tab bar (hidden in the full editor view) ── */}
+        {!typeEditorOpen && (
         <div className="shrink-0 bg-white rounded-2xl border border-bordergray shadow-[0_1px_3px_rgba(15,23,42,0.04)] p-2 flex items-center gap-2">
           <div className="flex items-center gap-1.5 pl-2 pr-1 shrink-0">
             <Layers size={13} className="text-select-blue" />
@@ -1043,6 +1005,16 @@ const ProposalMaster = () => {
             />
           </div>
 
+          {/* Keyboard shortcuts */}
+          <button
+            type="button"
+            onClick={() => setShowShortcuts(true)}
+            title="Keyboard shortcuts ( ? )"
+            className="hidden sm:flex shrink-0 items-center gap-1 px-2.5 py-2 bg-white border border-bordergray rounded-lg text-[11px] font-semibold text-text-muted hover:bg-bg-soft hover:text-textcolor transition-all"
+          >
+            <Keyboard size={12} />
+          </button>
+
           {/* Add preset — pinned to the right end */}
           {showAddPreset ? (
             <div className="flex items-center gap-1.5 shrink-0">
@@ -1089,15 +1061,17 @@ const ProposalMaster = () => {
             </button>
           )}
         </div>
+        )}
 
         {/* ── Editor + right panel ──────────────────────────────────────── */}
         <div className="grid grid-cols-1 gap-5 items-stretch flex-1 min-h-0 overflow-hidden">
           {/* ── Middle: Editor ──────────────────────────────────────────── */}
           <main className="space-y-5 min-w-0 overflow-y-auto pb-28 scroll-hidden-bar">
-            {/* Preset hero card */}
-            <section className="relative bg-white rounded-2xl border border-bordergray shadow-[0_1px_3px_rgba(15,23,42,0.04)] overflow-y-auto overflow-hidden">
-              <div className="absolute inset-x-0 top-0 h-24 bg-linear-to-br from-select-blue/8 via-active-bg/40 to-transparent pointer-events-none" />
-              <div className="relative px-5 py-4 border-b border-bordergray flex items-center justify-between gap-3">
+            {/* ── Property Types — selection view (editor collapsed) ─────── */}
+            {!typeEditorOpen && (
+            <section className="bg-white rounded-2xl border border-bordergray shadow-[0_1px_3px_rgba(15,23,42,0.04)] p-4">
+              {/* Preset header — manage the active preset, then pick a type */}
+              <div className="flex items-center justify-between gap-3 pb-3 mb-3 border-b border-bordergray">
                 <div className="flex items-center gap-2 min-w-0 flex-1">
                   {renaming ? (
                     <div className="flex items-center gap-1.5 flex-1">
@@ -1137,10 +1111,8 @@ const ProposalMaster = () => {
                     </div>
                   ) : (
                     <>
-                      <span className="inline-flex items-center gap-1 text-[10px] font-bold tracking-widest uppercase text-select-blue bg-white/80 backdrop-blur px-2 py-1 rounded-md shrink-0 border border-select-blue/20">
-                        <Tag size={10} /> {activeKey}
-                      </span>
-                      <span className="text-[12px] text-text-muted truncate">
+                      <Tag size={12} className="text-select-blue shrink-0" />
+                      <span className="text-[12.5px] font-bold text-textcolor truncate">
                         {active.label}
                       </span>
                     </>
@@ -1176,26 +1148,197 @@ const ProposalMaster = () => {
                 )}
               </div>
 
-              <div className="relative p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <Field
-                  icon={<Tag size={11} />}
-                  label="Label"
-                  hint="Automatically generated from preset key and property type"
+              <div className="flex items-center gap-1.5 mb-3">
+                <Home size={12} className="text-select-blue" />
+                <h3 className="text-[11px] font-bold uppercase tracking-wider text-textcolor">
+                  Property Types
+                </h3>
+                <span className="text-[10px] text-text-muted">
+                  · select a type to open its editor
+                </span>
+              </div>
+              <div className="flex items-stretch gap-2 flex-wrap">
+                {(active.configurations || []).map((cfg, idx) => {
+                  const isActive = idx === activeConfigIdx;
+                  const cfgItems = cfg.scopeItems || [];
+                  const cfgTotal = computeTotals(cfgItems);
+                  return (
+                    <button
+                      key={cfg.propertyType}
+                      type="button"
+                      onClick={() => {
+                        setActiveConfigIdx(idx);
+                        setTypeEditorOpen(true);
+                      }}
+                      title={`Open the editor for ${cfg.propertyType}`}
+                      className={`text-left rounded-xl border px-3 py-2.5 min-w-[160px] transition-all ${
+                        isActive
+                          ? "bg-active-bg border-select-blue/50 shadow-[0_1px_3px_rgba(30,58,138,0.08)]"
+                          : "bg-white border-bordergray hover:border-select-blue/40 hover:shadow-[0_2px_8px_rgba(15,23,42,0.06)]"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span
+                          className={`text-[12px] font-bold truncate ${isActive ? "text-select-blue" : "text-textcolor"}`}
+                        >
+                          {cfg.propertyType}
+                        </span>
+                        {isActive && (
+                          <Check
+                            size={13}
+                            strokeWidth={3}
+                            className="text-select-blue shrink-0"
+                          />
+                        )}
+                      </div>
+                      <div className="text-[10px] text-text-muted">
+                        {formatSizeRange(cfg.sizeRange) || "Size not set"}
+                      </div>
+                      <div className="flex items-center justify-between gap-2 mt-1.5 text-[10.5px]">
+                        <span className="text-text-muted">
+                          {cfgItems.length} scope
+                          {cfgItems.length === 1 ? "" : "s"}
+                        </span>
+                        <span
+                          className={`font-bold tabular-nums ${isActive ? "text-select-blue" : "text-textcolor"}`}
+                        >
+                          {formatAmount(cfgTotal.grandTotal)}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={() => setAddTypeModalOpen(true)}
+                  className="flex flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-bordergray px-4 min-w-[110px] text-text-muted hover:border-select-blue hover:text-select-blue hover:bg-active-bg/40 transition-all"
                 >
-                  <input
-                    type="text"
-                    value={active.label}
-                    readOnly
-                    className={`${inputBase} bg-bg-soft border-bordergray cursor-not-allowed text-text-muted`}
-                    title="Automatically generated from preset key and property type"
-                  />
-                </Field>
-                <Field
-                  icon={<Ruler size={11} />}
-                  label="Size Range"
-                  hint="Per property type · used to compute ₹/sq ft"
+                  <Plus size={15} />
+                  <span className="text-[11px] font-semibold">Add Type</span>
+                </button>
+              </div>
+              {activeConfig && (active.configurations || []).length > 1 && (
+                <div className="mt-2 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const typeName = activeConfig.propertyType;
+                      // Check if this property type is used by any active record globally
+                      if (isPropertyTypeInUse(typeName)) {
+                        showToast(
+                          `Cannot remove "${typeName}" — it is linked with active records.`,
+                          "error",
+                        );
+                        return;
+                      }
+                      askConfirm({
+                        title: `Permanently delete "${typeName}"?`,
+                        message:
+                          "This will remove the property type globally from all presets, inquiry forms, proposal forms, and convert-to-client forms. This cannot be undone.",
+                        confirmLabel: "Delete Globally",
+                        danger: true,
+                        onConfirm: () => {
+                          // 1. Remove from global registry
+                          removePropertyTypeGlobally(typeName);
+                          // 2. Remove from every preset in master
+                          setMaster((prev) => {
+                            const next = {};
+                            for (const pk of Object.keys(prev)) {
+                              const preset = prev[pk];
+                              const configs = (
+                                preset.configurations || []
+                              ).filter(
+                                (c) =>
+                                  c.propertyType.trim().toLowerCase() !==
+                                  typeName.trim().toLowerCase(),
+                              );
+                              // Keep at least one config — if all removed, keep as-is
+                              next[pk] = {
+                                ...preset,
+                                configurations:
+                                  configs.length > 0
+                                    ? configs
+                                    : preset.configurations,
+                              };
+                            }
+                            return next;
+                          });
+                          // 3. Clean up hidden configs cache
+                          setHiddenConfigs((prev) => {
+                            const next = { ...prev };
+                            for (const key of Object.keys(next)) {
+                              if (
+                                key.split("::")[1]?.trim().toLowerCase() ===
+                                typeName.trim().toLowerCase()
+                              ) {
+                                delete next[key];
+                              }
+                            }
+                            return next;
+                          });
+                          setActiveConfigIdx(0);
+                          showToast(`"${typeName}" deleted globally`, "info");
+                        },
+                      });
+                    }}
+                    className="flex items-center gap-1 text-[10px] font-semibold text-red-400 hover:text-red-600"
+                  >
+                    <Trash2 size={10} /> Remove Type
+                  </button>
+                </div>
+              )}
+            </section>
+            )}
+
+            {/* ── Editor view — opens when a type card is clicked ────────── */}
+            {typeEditorOpen && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setTypeEditorOpen(false)}
+                  className="w-fit flex items-center gap-1.5 text-[12px] font-semibold text-text-muted hover:text-select-blue"
                 >
-                  <div className="relative flex items-center">
+                  <ChevronLeft size={15} /> Property Types
+                  {activeConfig?.propertyType && (
+                    <span className="text-text-subtle font-normal">
+                      / {activeConfig.propertyType}
+                    </span>
+                  )}
+                </button>
+
+            {/* Preset hero card */}
+            <section className="relative bg-white rounded-2xl border border-bordergray shadow-[0_1px_3px_rgba(15,23,42,0.04)] overflow-y-auto overflow-hidden">
+              <div className="absolute inset-x-0 top-0 h-24 bg-linear-to-br from-select-blue/8 via-active-bg/40 to-transparent pointer-events-none" />
+              <div className="relative px-5 py-4 border-b border-bordergray flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                {/* Left — property type + preset context */}
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="h-9 w-9 rounded-xl bg-select-blue/10 text-select-blue flex items-center justify-center shrink-0">
+                    <Home size={16} />
+                  </span>
+                  <div className="min-w-0">
+                    <h2 className="text-[15px] font-bold text-textcolor leading-tight truncate">
+                      {activeConfig?.propertyType || "Property Type"}
+                    </h2>
+                    <span className="flex items-center gap-1.5 text-[11px] text-text-muted">
+                      <span className="inline-flex items-center gap-1 font-bold uppercase tracking-wider text-select-blue">
+                        <Tag size={9} /> {activeKey}
+                      </span>
+                      <span className="text-text-subtle truncate">
+                        {active.label}
+                      </span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* Right — Size Range shares the row (uses the empty space) */}
+                <div className="shrink-0 w-full sm:w-auto">
+                  <label className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-text-muted mb-1">
+                    <Ruler size={10} /> Size Range
+                    <span className="font-medium normal-case tracking-normal text-text-subtle">
+                      · ₹/sq ft basis
+                    </span>
+                  </label>
+                  <div className="relative flex items-center w-full sm:w-44">
                     <input
                       type="text"
                       inputMode="numeric"
@@ -1219,7 +1362,7 @@ const ProposalMaster = () => {
                         });
                       }}
                       placeholder="e.g. 1000"
-                      className={`${inputBase} pr-14`}
+                      className={`${inputBase} pr-12 py-1.5`}
                     />
                     <span className="absolute right-3 text-[10px] font-bold text-gray-400 pointer-events-none uppercase">
                       Sq Ft
@@ -1230,114 +1373,9 @@ const ProposalMaster = () => {
                       {sizeRangeError}
                     </p>
                   )}
-                </Field>
+                </div>
               </div>
 
-              {/* ── Property Type Configuration Tabs ─────────────────── */}
-              <div className="relative px-5 pb-4">
-                <Field
-                  icon={<Home size={11} />}
-                  label="Property Types"
-                  hint="Each type has its own scope, pricing & inclusions"
-                >
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {(active.configurations || []).map((cfg, idx) => (
-                      <button
-                        key={cfg.propertyType}
-                        type="button"
-                        onClick={() => setActiveConfigIdx(idx)}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[11px] font-semibold transition-all ${
-                          idx === activeConfigIdx
-                            ? "bg-select-blue text-white border-select-blue shadow-sm"
-                            : "bg-white text-text-muted border-bordergray hover:border-select-blue/40 hover:text-select-blue"
-                        }`}
-                      >
-                        {idx === activeConfigIdx && (
-                          <Check size={10} strokeWidth={3} />
-                        )}
-                        {cfg.propertyType}
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => setAddTypeModalOpen(true)}
-                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-linear-to-br from-select-blue to-primary text-white text-[11px] font-semibold shadow-sm hover:shadow-md hover:shadow-select-blue/20 transition-all"
-                    >
-                      <Plus size={11} /> Add Type
-                    </button>
-                  </div>
-                </Field>
-                {activeConfig && (active.configurations || []).length > 1 && (
-                  <div className="mt-2 flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const typeName = activeConfig.propertyType;
-                        // Check if this property type is used by any active record globally
-                        if (isPropertyTypeInUse(typeName)) {
-                          showToast(
-                            `Cannot remove "${typeName}" — it is linked with active records.`,
-                            "error",
-                          );
-                          return;
-                        }
-                        askConfirm({
-                          title: `Permanently delete "${typeName}"?`,
-                          message:
-                            "This will remove the property type globally from all presets, inquiry forms, proposal forms, and convert-to-client forms. This cannot be undone.",
-                          confirmLabel: "Delete Globally",
-                          danger: true,
-                          onConfirm: () => {
-                            // 1. Remove from global registry
-                            removePropertyTypeGlobally(typeName);
-                            // 2. Remove from every preset in master
-                            setMaster((prev) => {
-                              const next = {};
-                              for (const pk of Object.keys(prev)) {
-                                const preset = prev[pk];
-                                const configs = (
-                                  preset.configurations || []
-                                ).filter(
-                                  (c) =>
-                                    c.propertyType.trim().toLowerCase() !==
-                                    typeName.trim().toLowerCase(),
-                                );
-                                // Keep at least one config — if all removed, keep as-is
-                                next[pk] = {
-                                  ...preset,
-                                  configurations:
-                                    configs.length > 0
-                                      ? configs
-                                      : preset.configurations,
-                                };
-                              }
-                              return next;
-                            });
-                            // 3. Clean up hidden configs cache
-                            setHiddenConfigs((prev) => {
-                              const next = { ...prev };
-                              for (const key of Object.keys(next)) {
-                                if (
-                                  key.split("::")[1]?.trim().toLowerCase() ===
-                                  typeName.trim().toLowerCase()
-                                ) {
-                                  delete next[key];
-                                }
-                              }
-                              return next;
-                            });
-                            setActiveConfigIdx(0);
-                            showToast(`"${typeName}" deleted globally`, "info");
-                          },
-                        });
-                      }}
-                      className="flex items-center gap-1 text-[10px] font-semibold text-red-400 hover:text-red-600"
-                    >
-                      <Trash2 size={10} /> Remove Type
-                    </button>
-                  </div>
-                )}
-              </div>
 
               {/* Smart Estimator Card */}
               {activeConfig && (
@@ -1384,54 +1422,49 @@ const ProposalMaster = () => {
                   </div>
 
                   {activeConfig.enableFormulaEstimator && (
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start border-t border-bordergray pt-3">
-                        <div>
-                          <label className="block text-[10px] font-bold text-text-muted uppercase tracking-wider mb-1.5">
-                            Total Project Area (Sq.ft)
-                          </label>
-                          <input
-                            type="number"
-                            value={
+                    <div className="space-y-3 border-t border-bordergray pt-3">
+                      {/* Compact read-only summary — no fake inputs */}
+                      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px]">
+                        <span className="flex items-center gap-1.5">
+                          <Ruler size={12} className="text-text-subtle" />
+                          <span className="text-text-muted">Total area</span>
+                          <span
+                            className="font-bold text-textcolor tabular-nums"
+                            title="Derived from Size Range — edit Size Range to change this"
+                          >
+                            {(
                               activeConfig.totalArea ||
                               parseBaseArea(activeConfig.sizeRange) ||
-                              ""
-                            }
-                            readOnly
-                            title="Derived from Size Range above — edit Size Range to change this"
-                            placeholder="e.g. 1000"
-                            className="w-full rounded-xl border border-bordergray bg-bg-soft px-3.5 py-2 text-[12.5px] text-text-muted cursor-not-allowed"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-bold text-text-muted uppercase tracking-wider mb-1.5">
-                            Allocation Sum
-                          </label>
-                          <div className="flex items-center gap-2 h-[38px]">
-                            <span
-                              className={`px-3 py-1 rounded-full text-[11px] font-bold ${
-                                allocationSum === 100
-                                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                  : "bg-amber-50 text-amber-700 border border-amber-250 animate-pulse"
-                              }`}
-                            >
-                              {allocationSum}% Allocated
+                              0
+                            ).toLocaleString("en-IN")}{" "}
+                            sqft
+                          </span>
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          <span className="text-text-muted">Allocated</span>
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10.5px] font-bold ${
+                              allocationSum === 100
+                                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                : "bg-amber-50 text-amber-700 border border-amber-200 animate-pulse"
+                            }`}
+                          >
+                            {allocationSum}%
+                          </span>
+                          {allocationSum !== 100 && (
+                            <span className="text-[9.5px] text-red-500 font-bold">
+                              must equal 100%
                             </span>
-                            {allocationSum !== 100 && (
-                              <span className="text-[9.5px] text-red-500 font-bold">
-                                Should equal exactly 100%
-                              </span>
-                            )}
-                          </div>
-                        </div>
+                          )}
+                        </span>
                       </div>
 
-                      {/* Room Allocation Grid */}
-                      <div className="border-t border-bordergray pt-3 space-y-2">
-                        <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-1">
-                          Room Allocations & Split
+                      {/* Room allocations — compact rows with a visual split bar */}
+                      <div>
+                        <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-1.5">
+                          Room Allocations &amp; Split
                         </p>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[160px] overflow-y-auto scroll-hidden-bar">
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-5 gap-y-1 max-h-[200px] overflow-y-auto scroll-hidden-bar pr-1">
                           {Object.keys(activeConfig.roomAllocations || {}).map((room) => {
                             const pct = activeConfig.roomAllocations[room] || 0;
                             const totalAreaVal = activeConfig.totalArea || parseBaseArea(activeConfig.sizeRange) || 1000;
@@ -1439,38 +1472,45 @@ const ProposalMaster = () => {
                             return (
                               <div
                                 key={room}
-                                className="flex items-center justify-between p-2 rounded-xl border border-bordergray bg-bg-soft/40"
+                                className="flex items-center gap-2 py-1"
                               >
-                                <span className="text-[11px] font-bold text-textcolor truncate max-w-[120px]" title={room}>
+                                <span
+                                  className="text-[11px] font-semibold text-textcolor truncate w-[92px] shrink-0"
+                                  title={room}
+                                >
                                   {room}
                                 </span>
-                                <div className="flex items-center gap-1.5 shrink-0">
-                                  <div className="flex items-center">
-                                    <input
-                                      type="number"
-                                      value={pct}
-                                      onChange={(e) => {
-                                        const newVal = Number(e.target.value);
-                                        setConfigField((cfg) => {
-                                          const currentAllocs = { ...(cfg.roomAllocations || {}) };
-                                          currentAllocs[room] = newVal;
-                                          const totalAreaVal = cfg.totalArea || parseBaseArea(cfg.sizeRange) || 1000;
-                                          const finalItems = recalculateScopeItems(cfg.scopeItems, totalAreaVal, currentAllocs, true);
-                                          return {
-                                            ...cfg,
-                                            roomAllocations: currentAllocs,
-                                            scopeItems: finalItems,
-                                          };
-                                        });
-                                      }}
-                                      className="w-10 text-center rounded-lg border border-bordergray py-1 text-[11px] text-textcolor focus:outline-none focus:border-select-blue"
-                                    />
-                                    <span className="text-[10px] text-text-muted ml-0.5">%</span>
-                                  </div>
-                                  <span className="text-[10px] text-text-muted">
-                                    ({roomArea} sqft)
-                                  </span>
+                                <div className="flex-1 h-1.5 min-w-0 bg-bg-soft rounded-full overflow-hidden">
+                                  <div
+                                    className="h-full bg-select-blue rounded-full transition-all"
+                                    style={{ width: `${Math.min(100, pct)}%` }}
+                                  />
                                 </div>
+                                <div className="flex items-center gap-0.5 shrink-0">
+                                  <input
+                                    type="number"
+                                    value={pct}
+                                    onChange={(e) => {
+                                      const newVal = Number(e.target.value);
+                                      setConfigField((cfg) => {
+                                        const currentAllocs = { ...(cfg.roomAllocations || {}) };
+                                        currentAllocs[room] = newVal;
+                                        const totalAreaVal = cfg.totalArea || parseBaseArea(cfg.sizeRange) || 1000;
+                                        const finalItems = recalculateScopeItems(cfg.scopeItems, totalAreaVal, currentAllocs, true);
+                                        return {
+                                          ...cfg,
+                                          roomAllocations: currentAllocs,
+                                          scopeItems: finalItems,
+                                        };
+                                      });
+                                    }}
+                                    className="w-11 text-center rounded-md border border-bordergray py-0.5 text-[11px] text-textcolor tabular-nums focus:outline-none focus:border-select-blue"
+                                  />
+                                  <span className="text-[10px] text-text-muted">%</span>
+                                </div>
+                                <span className="text-[9.5px] text-text-subtle tabular-nums w-[58px] text-right shrink-0">
+                                  {roomArea.toLocaleString("en-IN")} sqft
+                                </span>
                               </div>
                             );
                           })}
@@ -1601,53 +1641,62 @@ const ProposalMaster = () => {
                 {groupedScope.map((group) => {
                   const gcat = getCategory(group.room);
                   const gc = COLOR_MAP[gcat.color];
+                  const GroupIcon = gcat.icon;
                   const groupOpen = isGroupOpen(group.room);
+                  const roomShare =
+                    totals.subtotal > 0
+                      ? Math.round((group.total / totals.subtotal) * 100)
+                      : 0;
                   return (
-                    <div key={group.room}>
-                      {/* Room group accordion header — click to expand/collapse */}
+                    <div
+                      key={group.room}
+                      className="rounded-2xl border border-bordergray bg-white overflow-hidden shadow-[0_1px_3px_rgba(15,23,42,0.04)]"
+                    >
+                      {/* Room header — click to expand/collapse */}
                       <button
                         type="button"
                         onClick={() => toggleGroup(group.room)}
-                        className="w-full flex items-center justify-between mb-2 px-2 py-1.5 rounded-lg hover:bg-bg-soft/60 transition-colors cursor-pointer"
+                        className="w-full flex items-center justify-between gap-3 px-3 py-2.5 hover:bg-bg-soft/60 transition-colors cursor-pointer"
                       >
-                        <div className="flex items-center gap-2 min-w-0">
+                        <div className="flex items-center gap-2.5 min-w-0">
                           {groupOpen ? (
-                            <ChevronDown
-                              size={13}
-                              className="text-text-muted shrink-0"
-                            />
+                            <ChevronDown size={14} className="text-text-muted shrink-0" />
                           ) : (
-                            <ChevronRight
-                              size={13}
-                              className="text-text-muted shrink-0"
-                            />
+                            <ChevronRight size={14} className="text-text-muted shrink-0" />
                           )}
                           <span
-                            className={`h-2.5 w-2.5 rounded-full shrink-0 ${gc.dot}`}
-                          />
-                          <h4 className="text-[12px] font-bold text-textcolor uppercase tracking-wide truncate">
-                            {group.room}
-                          </h4>
-                          <span className="text-[10px] font-semibold text-text-muted bg-bg-soft px-1.5 py-0.5 rounded-md border border-bordergray">
-                            {group.rows.length}
+                            className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${gc.bg} ${gc.text}`}
+                          >
+                            <GroupIcon size={15} />
                           </span>
+                          <div className="text-left min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <h4 className="text-[12px] font-bold text-textcolor uppercase tracking-wide truncate">
+                                {group.room}
+                              </h4>
+                              <span className="text-[9.5px] font-semibold text-text-muted bg-bg-soft px-1.5 py-0.5 rounded-md border border-bordergray shrink-0">
+                                {group.rows.length}
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-text-muted">
+                              {roomShare}% of quote
+                            </p>
+                          </div>
                         </div>
-                        <span className="text-[11px] font-bold text-textcolor tabular-nums shrink-0">
-                          {formatAmount(group.total)}
-                        </span>
+                        <div className="text-right shrink-0">
+                          <span className="block text-[12.5px] font-bold text-textcolor tabular-nums">
+                            {formatAmount(group.total)}
+                          </span>
+                          <div className="w-24 h-1 bg-bg-soft rounded-full overflow-hidden mt-1 ml-auto">
+                            <div
+                              className={`h-full ${gc.bar}`}
+                              style={{ width: `${Math.min(100, roomShare)}%` }}
+                            />
+                          </div>
+                        </div>
                       </button>
                       {groupOpen && (
-                        <div className="rounded-xl border border-bordergray overflow-hidden divide-y divide-bordergray">
-                          {/* Column header — one per room */}
-                          <div className="grid grid-cols-[minmax(0,1fr)_92px_104px_88px_64px_132px_56px] gap-2 px-3 py-2 bg-bg-soft/60 text-[9px] font-bold uppercase tracking-wider text-text-muted">
-                            <span>Item</span>
-                            <span>Unit</span>
-                            <span>Rate/Sqft (₹)</span>
-                            <span className="text-right">Qty</span>
-                            <span className="text-center">Days</span>
-                            <span className="text-right">Amount</span>
-                            <span />
-                          </div>
+                        <div className="border-t border-bordergray divide-y divide-bordergray">
                           {group.rows.map(({ item, idx }) => {
                             const isOpen = !!expanded[idx];
                             const matCount = (item.materials || []).length;
@@ -1661,32 +1710,29 @@ const ProposalMaster = () => {
                                 : 0;
                             const split =
                               activeConfig?.roomAllocations?.[scopeRoomKey(item)];
-                            const unitLabel =
-                              UNITS.find(
-                                (u) => u.code === (item.unit || "sqft"),
-                              )?.label ||
-                              item.unit ||
-                              "—";
                             // Price each material from the linked rate build-up
                             // recipe so amounts match the Item Master build-up.
                             const matLib = item.masterId
                               ? libById[item.masterId]
                               : null;
-                            const matGrade =
+                            const rowGrade =
                               item.grade ||
                               activeConfig?.grade ||
                               activeGrade ||
                               "economy";
-                            const recipeLines = (
-                              matLib?.recipes?.[matGrade] ||
-                              item.recipes?.[matGrade]
-                            )
-                              ? computeRecipe(
-                                  matLib?.recipes?.[matGrade] ||
-                                    item.recipes?.[matGrade],
-                                  matById,
-                                ).lines
-                              : [];
+                            const rowRecipe =
+                              matLib?.recipes?.[rowGrade] ||
+                              item.recipes?.[rowGrade];
+                            const rowCalc = rowRecipe
+                              ? computeRecipe(rowRecipe, matById)
+                              : null;
+                            const recipeLines = rowCalc?.lines || [];
+                            // Whether this scope actually has the selected grade's
+                            // build-up (rate > 0). When false, the grade chip is shown
+                            // muted and the price is left unchanged — no functional
+                            // change, just an honest "no <grade> for this item" cue.
+                            const gradeShort = gradeShorthand(rowGrade);
+                            const gradeAvailable = (rowCalc?.rate || 0) > 0;
                             // Use the exact per-material amount from the rate
                             // build-up (same `line.amount` the Item Master work
                             // item modal shows). Fall back to the stored build-up
@@ -1712,22 +1758,24 @@ const ProposalMaster = () => {
                             };
                             return (
                               <div key={idx} className="group bg-white">
-                                {/* Read-only row — every field is display-only; edit
-                                    only via the item name or the pencil (Edit Scope). */}
-                                <div className="grid grid-cols-[minmax(0,1fr)_92px_104px_88px_64px_132px_56px] gap-2 px-3 py-2 items-center hover:bg-bg-soft/30 transition-colors">
-                                  {/* ITEM */}
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <span
-                                      className={`h-7 w-7 flex items-center justify-center rounded-lg shrink-0 ${c.bg} ${c.text}`}
-                                    >
-                                      <Icon size={13} />
-                                    </span>
-                                    <div className="min-w-0 flex-1">
+                                {/* Read-only row — click anywhere to edit (opens Edit
+                                    Scope); the action buttons stop propagation. */}
+                                <div className="flex items-start gap-3 px-4 py-3 hover:bg-bg-soft/40 transition-colors">
+                                  {/* Category icon */}
+                                  <span
+                                    className={`h-8 w-8 flex items-center justify-center rounded-lg shrink-0 ${c.bg} ${c.text}`}
+                                  >
+                                    <Icon size={14} />
+                                  </span>
+
+                                  {/* Description — reads like a quotation line */}
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-1.5 min-w-0">
                                       <button
                                         type="button"
                                         onClick={() => openEditScope(idx)}
                                         title="Click to edit this scope"
-                                        className="block max-w-full truncate text-left text-[12px] font-semibold text-textcolor hover:text-select-blue hover:underline"
+                                        className="min-w-0 truncate text-left text-[12.5px] font-bold text-textcolor hover:text-select-blue hover:underline transition-colors cursor-pointer"
                                       >
                                         {namedOriginalItems[idx]
                                           ?._displayCategory ||
@@ -1738,95 +1786,125 @@ const ProposalMaster = () => {
                                             </span>
                                           )}
                                       </button>
-                                      {item.description && (
-                                        <span className="block text-[10.5px] text-text-muted truncate">
-                                          {item.description}
+                                      {gradeShort && (
+                                        <span
+                                          className={`shrink-0 text-[8.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${
+                                            gradeAvailable
+                                              ? gradeChipStyle(rowGrade)
+                                              : "bg-bg-soft text-text-subtle border-bordergray border-dashed"
+                                          }`}
+                                          title={
+                                            gradeAvailable
+                                              ? `${gradeLabel(rowGrade)} grade`
+                                              : `No ${gradeLabel(rowGrade)} build-up for this item — price unchanged`
+                                          }
+                                        >
+                                          {gradeShort}
                                         </span>
                                       )}
                                     </div>
-                                  </div>
-                                  {/* UNIT */}
-                                  <span
-                                    className="text-[11px] text-textcolor truncate"
-                                    title={unitLabel}
-                                  >
-                                    {unitLabel}
-                                  </span>
-                                  {/* RATE */}
-                                  <span className="text-[11px] text-textcolor tabular-nums">
-                                    ₹
-                                    {Number(item.rate || 0).toLocaleString(
-                                      "en-IN",
+                                    {item.description && (
+                                      <span
+                                        className="block text-[10.5px] text-text-muted truncate mt-0.5"
+                                        title={item.description}
+                                      >
+                                        {item.description}
+                                      </span>
                                     )}
-                                  </span>
-                                  {/* QTY — calculated */}
-                                  <div
-                                    className="px-1 text-right tabular-nums leading-tight"
-                                    title={
-                                      split != null
-                                        ? `Calculated quantity · ${split}% area split`
-                                        : "Calculated quantity"
-                                    }
-                                  >
-                                    <span className="block text-[11px] font-semibold text-textcolor">
-                                      {Number(item.qty || 0).toLocaleString(
-                                        "en-IN",
-                                        { maximumFractionDigits: 2 },
-                                      ) || "—"}
-                                    </span>
-                                    <span className="block text-[9px] text-text-subtle">
-                                      {item.unit || ""}
-                                      {split != null ? ` · ${split}%` : ""}
-                                    </span>
+                                    {/* Detail line — micro-cap labels, clear grouping */}
+                                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1.5">
+                                      <span
+                                        className="inline-flex items-baseline gap-1.5"
+                                        title={
+                                          split != null
+                                            ? `${split}% area split`
+                                            : "Calculated quantity"
+                                        }
+                                      >
+                                        <span className="text-[9px] font-bold uppercase tracking-wider text-text-subtle">
+                                          Qty
+                                        </span>
+                                        <span className="text-[11px] font-semibold text-textcolor tabular-nums">
+                                          {Number(item.qty || 0).toLocaleString("en-IN", {
+                                            maximumFractionDigits: 2,
+                                          }) || "—"}{" "}
+                                          {item.unit || ""}
+                                          {split != null && (
+                                            <span className="font-medium text-text-muted">
+                                              {" "}
+                                              · {split}%
+                                            </span>
+                                          )}
+                                        </span>
+                                      </span>
+                                      <span className="inline-flex items-baseline gap-1.5">
+                                        <span className="text-[9px] font-bold uppercase tracking-wider text-text-subtle">
+                                          Rate
+                                        </span>
+                                        <span className="text-[11px] font-semibold text-textcolor tabular-nums">
+                                          ₹{Number(item.rate || 0).toLocaleString("en-IN")}
+                                        </span>
+                                      </span>
+                                      <span className="inline-flex items-baseline gap-1.5">
+                                        <span className="text-[9px] font-bold uppercase tracking-wider text-text-subtle">
+                                          Days
+                                        </span>
+                                        <span className="text-[11px] font-semibold text-textcolor tabular-nums">
+                                          {(item.days ?? "") !== ""
+                                            ? `${item.days} d`
+                                            : "—"}
+                                        </span>
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          toggleExpanded(idx);
+                                        }}
+                                        className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 -my-0.5 text-[10.5px] font-semibold text-select-blue hover:bg-active-bg/60 transition-colors"
+                                      >
+                                        Materials{matCount > 0 ? ` (${matCount})` : ""}
+                                        {isOpen ? (
+                                          <ChevronDown size={11} />
+                                        ) : (
+                                          <ChevronRight size={11} />
+                                        )}
+                                      </button>
+                                    </div>
                                   </div>
-                                  {/* DAYS */}
-                                  <span
-                                    className="text-[11px] text-textcolor tabular-nums text-center"
-                                    title="Default duration in days — seeds the project schedule"
-                                  >
-                                    {(item.days ?? "") !== ""
-                                      ? `${item.days} d`
-                                      : "—"}
-                                  </span>
-                                  {/* AMOUNT */}
-                                  <div className="text-right leading-tight">
-                                    <span className="block text-[12px] font-bold text-textcolor tabular-nums">
+
+                                  {/* Amount + share of quote */}
+                                  <div className="text-right shrink-0">
+                                    <span className="block text-[13.5px] font-bold text-textcolor tabular-nums">
                                       {formatAmount(amount)}
                                     </span>
                                     {pct > 0 && (
-                                      <span className="block text-[9px] font-semibold text-text-subtle tabular-nums">
-                                        {pct}%
-                                      </span>
+                                      <div className="flex items-center justify-end gap-1 mt-0.5">
+                                        <div className="w-12 h-1 bg-bg-soft rounded-full overflow-hidden">
+                                          <div
+                                            className={`h-full ${c.bar}`}
+                                            style={{ width: `${Math.min(100, pct)}%` }}
+                                          />
+                                        </div>
+                                        <span className="text-[9px] font-semibold text-text-subtle tabular-nums">
+                                          {pct}%
+                                        </span>
+                                      </div>
                                     )}
                                   </div>
-                                  {/* ACTIONS — view materials · edit · remove */}
-                                  <div className="flex items-center justify-end gap-0.5">
-                                    <button
-                                      type="button"
-                                      onClick={() => toggleExpanded(idx)}
-                                      title="Materials & specifications"
-                                      className="relative h-6 w-6 flex items-center justify-center rounded-md text-text-muted hover:text-select-blue hover:bg-bg-soft"
-                                    >
-                                      {isOpen ? (
-                                        <ChevronDown size={13} />
-                                      ) : (
-                                        <ChevronRight size={13} />
-                                      )}
-                                      {matCount > 0 && !isOpen && (
-                                        <span className="absolute -top-1 -right-1 h-3.5 min-w-[14px] px-0.5 flex items-center justify-center text-[8px] font-bold text-white bg-select-blue rounded-full">
-                                          {matCount}
-                                        </span>
-                                      )}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => removeScopeRow(idx)}
-                                      title="Remove row"
-                                      className="h-6 w-6 flex items-center justify-center rounded-md text-text-subtle hover:text-red-500 hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100"
-                                    >
-                                      <Trash2 size={13} />
-                                    </button>
-                                  </div>
+
+                                  {/* Remove (doesn't trigger row edit) */}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      removeScopeRow(idx);
+                                    }}
+                                    title="Remove scope"
+                                    className="h-7 w-7 flex items-center justify-center rounded-md text-text-subtle hover:text-red-500 hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
                                 </div>
 
                                 {/* Read-only Materials & Specifications */}
@@ -2031,11 +2109,14 @@ const ProposalMaster = () => {
                 )}
               </div>
             </section>
+              </>
+            )}
           </main>
         </div>
       </div>
 
-      {/* ── Sticky totals bar ──────────────────────────────────────────── */}
+      {/* ── Sticky totals bar — only in the editor view ────────────────── */}
+      {typeEditorOpen && (
       <div className="fixed bottom-0 left-0 right-0 lg:left-[260px] z-20 pointer-events-none">
         <div className="px-6 pb-4 flex justify-center">
           <div className="pointer-events-auto bg-white/95 backdrop-blur-xl border border-bordergray shadow-[0_8px_30px_rgba(15,23,42,0.12)] rounded-2xl px-5 py-3 flex items-center gap-5 flex-wrap">
@@ -2077,6 +2158,7 @@ const ProposalMaster = () => {
           </div>
         </div>
       </div>
+      )}
 
       {/* ── Toast ──────────────────────────────────────────────────────── */}
       {toast && (
@@ -2591,23 +2673,6 @@ const AddTypeModal = ({
 
 // Number input that hides "0" so users don't have to delete it before typing,
 // and shows the cost-share % suffix when meaningful.
-const Field = ({ icon, label, hint, children }) => (
-  <div>
-    <label className="flex items-center justify-between text-[10.5px] font-semibold uppercase tracking-wider text-text-muted mb-1.5">
-      <span className="flex items-center gap-1">
-        <span className="text-select-blue">{icon}</span>
-        {label}
-      </span>
-      {hint && (
-        <span className="text-[9.5px] font-normal text-text-subtle normal-case tracking-normal flex items-center gap-1">
-          <Info size={9} /> {hint}
-        </span>
-      )}
-    </label>
-    {children}
-  </div>
-);
-
 // Stats banner hidden per request — kept for future use.
 // const BentoStat = ({ icon, label, value, tint }) => {
 //   const tints = {

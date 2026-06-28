@@ -72,7 +72,6 @@ const Master = () => {
 
   const ActiveComponent =
     TABS.find((t) => t.id === activeTab)?.component || ProposalMaster;
-  const activeMeta = TABS.find((t) => t.id === activeTab);
 
   return (
     <div className="h-full flex flex-col bg-overallbg">
@@ -114,13 +113,6 @@ const Master = () => {
           })}
         </div>
       </div>
-
-      {/* Optional: active tab subtitle band */}
-      {activeMeta && (
-        <div className="px-6 py-2 bg-bg-soft/60 border-b border-bordergray/70 text-[11px] text-text-muted shrink-0">
-          {activeMeta.description}
-        </div>
-      )}
 
       {/* Active tab content */}
       <div className="flex-1 min-h-0 overflow-hidden">

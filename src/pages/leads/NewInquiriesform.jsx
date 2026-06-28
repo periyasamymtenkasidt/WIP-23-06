@@ -88,20 +88,6 @@ import { formatSizeRange } from "../../utils/sizeRangeValidation";
 import { PROJECT_INTENTS, LAND_OWNERSHIP } from "../../data/serviceTrack";
 import TrackPicker from "../../components/TrackPicker";
 
-const DEFAULT_PRESET = "";
-
-// Pull preset-defined defaults so a single dropdown change drives
-// propertyType + sizeRange — these mirror the fields managed in
-// Settings → Proposal Master.
-const buildPresetState = (key) => {
-  const cfg = getConfigForType(key);
-  return {
-    quotePreset: key,
-    quoteSizeRange: cfg?.sizeRange || "",
-    propertyType: cfg?.propertyType || "",
-  };
-};
-
 const INITIAL_FORM_STATE = {
   fullName: "",
   phoneNumber: "",
@@ -194,9 +180,6 @@ const formatLakhs = (rupees) => {
 
 function NewInquiriesform({ onClose, onAddLead }) {
   const presetKeys = useMemo(() => getPresetKeys(), []);
-  const defaultPresetKey = presetKeys.includes(DEFAULT_PRESET)
-    ? DEFAULT_PRESET
-    : presetKeys[0];
 
   const {
     register,
@@ -204,13 +187,12 @@ function NewInquiriesform({ onClose, onAddLead }) {
     setValue,
     watch,
     reset,
+    trigger,
+    clearErrors,
     formState: { errors },
   } = useForm({
     resolver: yupResolver(newInquirySchema),
-    defaultValues: {
-      ...INITIAL_FORM_STATE,
-      ...buildPresetState(defaultPresetKey),
-    },
+    defaultValues: { ...INITIAL_FORM_STATE },
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   // Once the user edits the possession date manually we stop auto-filling it.
@@ -278,12 +260,13 @@ function NewInquiriesform({ onClose, onAddLead }) {
 
   const handlePresetChange = (e) => {
     const key = e.target.value;
-    const presetState = buildPresetState(key);
-    setValue("quotePreset", presetState.quotePreset, { shouldValidate: true });
-    setValue("quoteSizeRange", presetState.quoteSizeRange);
-    setValue("propertyType", presetState.propertyType, {
-      shouldValidate: true,
-    });
+    setValue("quotePreset", key, { shouldValidate: true });
+    // No default property type — the user must pick one for the chosen preset.
+    // Don't eagerly validate (that would flag "required" before they pick) and
+    // clear any stale error so it doesn't linger after a type is selected.
+    setValue("propertyType", "");
+    clearErrors("propertyType");
+    setValue("quoteSizeRange", "");
   };
 
   const onSubmit = async (data) => {
@@ -322,10 +305,7 @@ function NewInquiriesform({ onClose, onAddLead }) {
         type="button"
         onClick={() => {
           setPossessionTouched(false);
-          reset({
-            ...INITIAL_FORM_STATE,
-            ...buildPresetState(defaultPresetKey),
-          });
+          reset({ ...INITIAL_FORM_STATE });
         }}
         disabled={isSubmitting}
         className="text-sm font-medium cursor-pointer hover:text-red-500 text-text-muted hover:text-text transition-colors disabled:opacity-50"
@@ -438,6 +418,7 @@ function NewInquiriesform({ onClose, onAddLead }) {
               label="Property Type"
               type="select"
               register={register("propertyType")}
+              onChange={() => trigger("propertyType")}
               options={getPropertyTypesForPreset(quotePreset)}
               error={errors.propertyType?.message}
             />

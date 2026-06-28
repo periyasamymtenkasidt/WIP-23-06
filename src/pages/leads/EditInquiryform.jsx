@@ -77,20 +77,6 @@ import {
 } from "../../data/serviceTrack";
 import TrackPicker from "../../components/TrackPicker";
 
-const DEFAULT_PRESET = "2BHK";
-
-// Pull preset-defined defaults so a single dropdown change drives
-// propertyType + sizeRange — these mirror the fields managed in
-// Settings → Proposal Master.
-const buildPresetState = (key) => {
-  const cfg = getConfigForType(key);
-  return {
-    quotePreset: key,
-    quoteSizeRange: cfg?.sizeRange || "",
-    propertyType: cfg?.propertyType || "",
-  };
-};
-
 const INITIAL_FORM_STATE = {
   fullName: "",
   phoneNumber: "",
@@ -188,6 +174,8 @@ function EditInquiryform({ initialData, onClose, onAddLead }) {
     setValue,
     watch,
     reset,
+    trigger,
+    clearErrors,
     formState: { errors },
   } = useForm({
     resolver: yupResolver(editInquirySchema),
@@ -215,28 +203,26 @@ function EditInquiryform({ initialData, onClose, onAddLead }) {
           : initialData.possessionDate;
     }
 
+    // Keep the saved preset only if it still exists — no default fallback;
+    // the user must pick one if none was saved.
     const presetKey = presetKeys.includes(initialData.quotePreset)
       ? initialData.quotePreset
-      : presetKeys.includes(DEFAULT_PRESET)
-        ? DEFAULT_PRESET
-        : presetKeys[0];
-    const presetDefaults = buildPresetState(presetKey);
+      : "";
 
-    // If the saved propertyType isn't in the preset's allowed list (e.g.
-    // the preset was edited later), fall back to the preset's default so
-    // the dropdown shows a valid selection.
-    const allowed = getPropertyTypesForPreset(presetKey);
+    // Keep the saved property type only if it's valid for the saved preset;
+    // otherwise leave it empty so the user must select one — no default.
+    const allowed = presetKey ? getPropertyTypesForPreset(presetKey) : [];
     const resolvedPropertyType =
       initialData.propertyType && allowed.includes(initialData.propertyType)
         ? initialData.propertyType
-        : presetDefaults.propertyType;
+        : "";
 
-    const liveCfg = getConfigForType(presetKey, resolvedPropertyType);
+    const liveCfg =
+      presetKey && resolvedPropertyType
+        ? getConfigForType(presetKey, resolvedPropertyType)
+        : null;
     const resolvedSizeRange =
-      liveCfg?.sizeRange ||
-      initialData.quoteSizeRange ||
-      presetDefaults.quoteSizeRange ||
-      "";
+      liveCfg?.sizeRange || initialData.quoteSizeRange || "";
 
     reset({
       fullName: initialData.clientName || "",
@@ -295,12 +281,13 @@ function EditInquiryform({ initialData, onClose, onAddLead }) {
 
   const handlePresetChange = (e) => {
     const key = e.target.value;
-    const presetState = buildPresetState(key);
-    setValue("quotePreset", presetState.quotePreset, { shouldValidate: true });
-    setValue("quoteSizeRange", presetState.quoteSizeRange);
-    setValue("propertyType", presetState.propertyType, {
-      shouldValidate: true,
-    });
+    setValue("quotePreset", key, { shouldValidate: true });
+    // No default property type — the user must pick one for the chosen preset.
+    // Don't eagerly validate (that would flag "required" before they pick) and
+    // clear any stale error so it doesn't linger after a type is selected.
+    setValue("propertyType", "");
+    clearErrors("propertyType");
+    setValue("quoteSizeRange", "");
   };
 
   const onSubmit = async (data) => {
@@ -440,6 +427,7 @@ function EditInquiryform({ initialData, onClose, onAddLead }) {
               label="Property Type"
               type="select"
               register={register("propertyType")}
+              onChange={() => trigger("propertyType")}
               options={getPropertyTypesForPreset(quotePreset)}
               error={errors.propertyType?.message}
             />

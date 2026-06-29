@@ -215,7 +215,9 @@ const ProposalMaster = () => {
   });
   const [showAddPreset, setShowAddPreset] = useState(false);
   const [newPresetKey, setNewPresetKey] = useState("");
-  const [expanded, setExpanded] = useState({});
+  // Anchored materials popover: { idx, rect } where rect is the trigger button's
+  // bounding box, or null when closed.
+  const [matPopover, setMatPopover] = useState(null);
   const [presetSearch, setPresetSearch] = useState("");
   const [toast, setToast] = useState(null);
   const [sizeRangeError, setSizeRangeError] = useState("");
@@ -793,8 +795,19 @@ const ProposalMaster = () => {
     });
   };
 
-  const toggleExpanded = (idx) => {
-    setExpanded((p) => ({ ...p, [idx]: !p[idx] }));
+  // Open the anchored materials popover for a scope row. It stays open until the
+  // user clicks the popover's X button; clicking another card's Materials button
+  // just moves the popover to that card.
+  const openMatPopover = (idx, e) => {
+    e.stopPropagation();
+    // Anchor to the whole scope card (not the small button) so the popover sits
+    // directly below the card and matches its width.
+    const card = e.currentTarget.closest("[data-scope-card]") || e.currentTarget;
+    const r = card.getBoundingClientRect();
+    setMatPopover({
+      idx,
+      rect: { top: r.top, bottom: r.bottom, left: r.left, width: r.width },
+    });
   };
 
   useEffect(() => {
@@ -1696,9 +1709,8 @@ const ProposalMaster = () => {
                         </div>
                       </button>
                       {groupOpen && (
-                        <div className="border-t border-bordergray divide-y divide-bordergray">
+                        <div className="border-t border-bordergray p-3 grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
                           {group.rows.map(({ item, idx }) => {
-                            const isOpen = !!expanded[idx];
                             const matCount = (item.materials || []).length;
                             const cat = getCategory(item.area);
                             const c = COLOR_MAP[cat.color];
@@ -1710,8 +1722,9 @@ const ProposalMaster = () => {
                                 : 0;
                             const split =
                               activeConfig?.roomAllocations?.[scopeRoomKey(item)];
-                            // Price each material from the linked rate build-up
-                            // recipe so amounts match the Item Master build-up.
+                            // Resolve the linked rate build-up only to tell whether
+                            // this scope has the selected grade's build-up (rate > 0),
+                            // which controls the grade chip's muted/active state.
                             const matLib = item.masterId
                               ? libById[item.masterId]
                               : null;
@@ -1726,93 +1739,95 @@ const ProposalMaster = () => {
                             const rowCalc = rowRecipe
                               ? computeRecipe(rowRecipe, matById)
                               : null;
-                            const recipeLines = rowCalc?.lines || [];
-                            // Whether this scope actually has the selected grade's
-                            // build-up (rate > 0). When false, the grade chip is shown
-                            // muted and the price is left unchanged — no functional
-                            // change, just an honest "no <grade> for this item" cue.
                             const gradeShort = gradeShorthand(rowGrade);
                             const gradeAvailable = (rowCalc?.rate || 0) > 0;
-                            // Use the exact per-material amount from the rate
-                            // build-up (same `line.amount` the Item Master work
-                            // item modal shows). Fall back to the stored build-up
-                            // fields only when no recipe line exists.
-                            const materialAmount = (m, mIdx) => {
-                              const line =
-                                recipeLines.find(
-                                  (l) =>
-                                    (m.materialId &&
-                                      l.materialId === m.materialId) ||
-                                    (m.id && l.materialId === m.id) ||
-                                    (l.name &&
-                                      m.name &&
-                                      l.name.toLowerCase() ===
-                                        m.name.toLowerCase()),
-                                ) || recipeLines[mIdx];
-                              if (line) return Number(line.amount) || 0;
-                              return (
-                                (Number(m.rate) || 0) *
-                                (Number(m.qty) || 0) *
-                                (1 + (Number(m.wastagePct) || 0) / 100)
-                              );
-                            };
+                            const popoverOpen = matPopover?.idx === idx;
                             return (
-                              <div key={idx} className="group bg-white">
-                                {/* Read-only row — click anywhere to edit (opens Edit
+                              <div
+                                key={idx}
+                                data-scope-card
+                                className={`group bg-white rounded-xl border transition-all ${
+                                  popoverOpen
+                                    ? "border-select-blue/50 shadow-[0_2px_10px_rgba(15,23,42,0.08)]"
+                                    : "border-bordergray hover:border-select-blue/40 hover:shadow-[0_2px_10px_rgba(15,23,42,0.06)]"
+                                }`}
+                              >
+                                {/* Card body — click the name to edit (opens Edit
                                     Scope); the action buttons stop propagation. */}
-                                <div className="flex items-start gap-3 px-4 py-3 hover:bg-bg-soft/40 transition-colors">
-                                  {/* Category icon */}
-                                  <span
-                                    className={`h-8 w-8 flex items-center justify-center rounded-lg shrink-0 ${c.bg} ${c.text}`}
-                                  >
-                                    <Icon size={14} />
-                                  </span>
+                                <div className="p-3.5">
+                                  {/* Header — icon, name + grade chip, amount, delete */}
+                                  <div className="flex items-start gap-2.5">
+                                    <span
+                                      className={`h-8 w-8 flex items-center justify-center rounded-lg shrink-0 ${c.bg} ${c.text}`}
+                                    >
+                                      <Icon size={14} />
+                                    </span>
 
-                                  {/* Description — reads like a quotation line */}
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-1.5 min-w-0">
-                                      <button
-                                        type="button"
-                                        onClick={() => openEditScope(idx)}
-                                        title="Click to edit this scope"
-                                        className="min-w-0 truncate text-left text-[12.5px] font-bold text-textcolor hover:text-select-blue hover:underline transition-colors cursor-pointer"
-                                      >
-                                        {namedOriginalItems[idx]
-                                          ?._displayCategory ||
-                                          item.itemName ||
-                                          item.area || (
-                                            <span className="text-text-subtle font-normal italic no-underline">
-                                              Untitled scope
-                                            </span>
-                                          )}
-                                      </button>
-                                      {gradeShort && (
-                                        <span
-                                          className={`shrink-0 text-[8.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${
-                                            gradeAvailable
-                                              ? gradeChipStyle(rowGrade)
-                                              : "bg-bg-soft text-text-subtle border-bordergray border-dashed"
-                                          }`}
-                                          title={
-                                            gradeAvailable
-                                              ? `${gradeLabel(rowGrade)} grade`
-                                              : `No ${gradeLabel(rowGrade)} build-up for this item — price unchanged`
-                                          }
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-1.5 min-w-0">
+                                        <button
+                                          type="button"
+                                          onClick={() => openEditScope(idx)}
+                                          title="Click to edit this scope"
+                                          className="min-w-0 truncate text-left text-[12.5px] font-bold text-textcolor hover:text-select-blue hover:underline transition-colors cursor-pointer"
                                         >
-                                          {gradeShort}
+                                          {namedOriginalItems[idx]
+                                            ?._displayCategory ||
+                                            item.itemName ||
+                                            item.area || (
+                                              <span className="text-text-subtle font-normal italic no-underline">
+                                                Untitled scope
+                                              </span>
+                                            )}
+                                        </button>
+                                        {gradeShort && (
+                                          <span
+                                            className={`shrink-0 text-[8.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${
+                                              gradeAvailable
+                                                ? gradeChipStyle(rowGrade)
+                                                : "bg-bg-soft text-text-subtle border-bordergray border-dashed"
+                                            }`}
+                                            title={
+                                              gradeAvailable
+                                                ? `${gradeLabel(rowGrade)} grade`
+                                                : `No ${gradeLabel(rowGrade)} build-up for this item — price unchanged`
+                                            }
+                                          >
+                                            {gradeShort}
+                                          </span>
+                                        )}
+                                      </div>
+                                      {item.description && (
+                                        <span
+                                          className="block text-[10.5px] text-text-muted truncate mt-0.5"
+                                          title={item.description}
+                                        >
+                                          {item.description}
                                         </span>
                                       )}
                                     </div>
-                                    {item.description && (
-                                      <span
-                                        className="block text-[10.5px] text-text-muted truncate mt-0.5"
-                                        title={item.description}
-                                      >
-                                        {item.description}
-                                      </span>
-                                    )}
-                                    {/* Detail line — micro-cap labels, clear grouping */}
-                                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1.5">
+
+                                    <span className="text-[14px] font-bold text-textcolor tabular-nums shrink-0">
+                                      {formatAmount(amount)}
+                                    </span>
+
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        removeScopeRow(idx);
+                                      }}
+                                      title="Remove scope"
+                                      className="h-7 w-7 flex items-center justify-center rounded-md text-text-subtle hover:text-red-500 hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+                                    >
+                                      <Trash2 size={13} />
+                                    </button>
+                                  </div>
+
+                                  {/* Metrics + share bar — aligned under the name so
+                                      the card fills its width instead of leaving a gap */}
+                                  <div className="mt-2.5 pl-[42px]">
+                                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                                       <span
                                         className="inline-flex items-baseline gap-1.5"
                                         title={
@@ -1857,123 +1872,37 @@ const ProposalMaster = () => {
                                       </span>
                                       <button
                                         type="button"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          toggleExpanded(idx);
-                                        }}
-                                        className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 -my-0.5 text-[10.5px] font-semibold text-select-blue hover:bg-active-bg/60 transition-colors"
+                                        onClick={(e) => openMatPopover(idx, e)}
+                                        title="View materials & specifications"
+                                        className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 -my-0.5 text-[10.5px] font-semibold transition-colors ${
+                                          popoverOpen
+                                            ? "bg-active-bg text-select-blue"
+                                            : "text-select-blue hover:bg-active-bg/60"
+                                        }`}
                                       >
                                         Materials{matCount > 0 ? ` (${matCount})` : ""}
-                                        {isOpen ? (
+                                        {popoverOpen ? (
                                           <ChevronDown size={11} />
                                         ) : (
                                           <ChevronRight size={11} />
                                         )}
                                       </button>
                                     </div>
-                                  </div>
-
-                                  {/* Amount + share of quote */}
-                                  <div className="text-right shrink-0">
-                                    <span className="block text-[13.5px] font-bold text-textcolor tabular-nums">
-                                      {formatAmount(amount)}
-                                    </span>
                                     {pct > 0 && (
-                                      <div className="flex items-center justify-end gap-1 mt-0.5">
-                                        <div className="w-12 h-1 bg-bg-soft rounded-full overflow-hidden">
+                                      <div className="flex items-center gap-2 mt-2">
+                                        <div className="flex-1 h-1.5 bg-bg-soft rounded-full overflow-hidden">
                                           <div
                                             className={`h-full ${c.bar}`}
                                             style={{ width: `${Math.min(100, pct)}%` }}
                                           />
                                         </div>
-                                        <span className="text-[9px] font-semibold text-text-subtle tabular-nums">
-                                          {pct}%
+                                        <span className="text-[9px] font-semibold text-text-subtle tabular-nums shrink-0">
+                                          {pct}% of quote
                                         </span>
                                       </div>
                                     )}
                                   </div>
-
-                                  {/* Remove (doesn't trigger row edit) */}
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      removeScopeRow(idx);
-                                    }}
-                                    title="Remove scope"
-                                    className="h-7 w-7 flex items-center justify-center rounded-md text-text-subtle hover:text-red-500 hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
-                                  >
-                                    <Trash2 size={13} />
-                                  </button>
                                 </div>
-
-                                {/* Read-only Materials & Specifications */}
-                                {isOpen && (
-                                  <div className="border-t border-bordergray bg-bg-soft/40 px-3 py-3">
-                                    <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-text-muted mb-2">
-                                      <Package
-                                        size={11}
-                                        className="text-select-blue"
-                                      />
-                                      Materials &amp; Specifications
-                                      {matCount > 0 && (
-                                        <span className="text-[9.5px] font-semibold text-text-subtle normal-case tracking-normal">
-                                          ({matCount})
-                                        </span>
-                                      )}
-                                    </p>
-                                    {matCount === 0 ? (
-                                      <p className="text-[10.5px] text-text-subtle">
-                                        No materials. Use Edit Scope to add them.
-                                      </p>
-                                    ) : (
-                                      <div className="space-y-1.5">
-                                        <div className="grid grid-cols-[160px_1fr_104px_28px] gap-2 px-2.5 text-[9px] font-bold uppercase tracking-wider text-text-subtle">
-                                          <span>Material</span>
-                                          <span>Specification</span>
-                                          <span className="text-right">Amount</span>
-                                          <span />
-                                        </div>
-                                        {(item.materials || []).map((m, mIdx) => {
-                                          const matAmount = materialAmount(m, mIdx);
-                                          return (
-                                            <div
-                                              key={mIdx}
-                                              className="grid grid-cols-[160px_1fr_104px_28px] gap-2 items-stretch"
-                                            >
-                                              <div className="bg-white border border-bordergray rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-textcolor truncate">
-                                                {m.name || "—"}
-                                              </div>
-                                              <div className="bg-white border border-bordergray rounded-lg px-2.5 py-1.5 text-[11px] text-text-muted truncate">
-                                                {m.spec || "—"}
-                                              </div>
-                                              <div
-                                                className="bg-white border border-bordergray rounded-lg px-2.5 py-1.5 text-[11px] font-semibold text-textcolor tabular-nums text-right truncate"
-                                                title="Material amount from the rate build-up"
-                                              >
-                                                {matAmount > 0
-                                                  ? `₹${Math.round(
-                                                      matAmount,
-                                                    ).toLocaleString("en-IN")}`
-                                                  : "—"}
-                                              </div>
-                                              <button
-                                                type="button"
-                                                onClick={() =>
-                                                  removeMaterial(idx, mIdx)
-                                                }
-                                                title="Remove material"
-                                                className="h-7 w-7 flex items-center justify-center rounded-md text-text-subtle hover:text-red-500 hover:bg-red-50 transition-colors"
-                                              >
-                                                <Trash2 size={12} />
-                                              </button>
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
                               </div>
                             );
                           })}
@@ -2323,6 +2252,174 @@ const ProposalMaster = () => {
           showToast={showToast}
         />
       )}
+
+      {/* Anchored materials popover — floats next to the clicked card's
+          "Materials" button (z-indexed), so the card grid never reflows. The
+          transparent backdrop closes it on any outside click. */}
+      {matPopover != null &&
+        scopeItems[matPopover.idx] &&
+        (() => {
+          const item = scopeItems[matPopover.idx];
+          const mats = item.materials || [];
+          const mLib = item.masterId ? libById[item.masterId] : null;
+          const grade =
+            item.grade || activeConfig?.grade || activeGrade || "economy";
+          const recipe = mLib?.recipes?.[grade] || item.recipes?.[grade];
+          const calc = recipe ? computeRecipe(recipe, matById) : null;
+          const lines = calc?.lines || [];
+          const matAmount = (m, mIdx) => {
+            const line =
+              lines.find(
+                (l) =>
+                  (m.materialId && l.materialId === m.materialId) ||
+                  (m.id && l.materialId === m.id) ||
+                  (l.name &&
+                    m.name &&
+                    l.name.toLowerCase() === m.name.toLowerCase()),
+              ) || lines[mIdx];
+            if (line) return Number(line.amount) || 0;
+            return (
+              (Number(m.rate) || 0) *
+              (Number(m.qty) || 0) *
+              (1 + (Number(m.wastagePct) || 0) / 100)
+            );
+          };
+          // Match the scope card's width and left edge so the panel sits exactly
+          // below the card; flip above / nudge left to stay inside the viewport.
+          const { rect } = matPopover;
+          const margin = 12;
+          const width = Math.min(rect.width, window.innerWidth - margin * 2);
+          const left = Math.max(
+            margin,
+            Math.min(rect.left, window.innerWidth - width - margin),
+          );
+          const spaceBelow = window.innerHeight - rect.bottom;
+          const openUp = spaceBelow < 260 && rect.top > spaceBelow;
+          const style = openUp
+            ? {
+                left,
+                width,
+                bottom: window.innerHeight - rect.top + 6,
+                maxHeight: rect.top - margin,
+              }
+            : {
+                left,
+                width,
+                top: rect.bottom + 6,
+                maxHeight: spaceBelow - margin,
+              };
+          // Caret: a small rotated square poking out of the panel edge toward the
+          // card. Points up when the panel is below the card, down when flipped
+          // above. Rendered separately so the panel's overflow-hidden can't clip it.
+          const caretLeft = Math.min(left + 28, left + width - 24);
+          const caretStyle = openUp
+            ? { left: caretLeft, top: rect.top - 12 }
+            : { left: caretLeft, top: rect.bottom };
+          const name =
+            namedOriginalItems[matPopover.idx]?._displayCategory ||
+            item.itemName ||
+            item.area ||
+            "Scope";
+          return (
+            <>
+              {/* Blocking overlay — absorbs clicks so nothing behind (scope name,
+                  other cards) is interactive while the popover is open. It does
+                  NOT close the popover; only the X button does. */}
+              <div
+                className="fixed inset-0 z-90 bg-gray-900/5"
+                onClick={(e) => e.stopPropagation()}
+              />
+              {/* Caret pointing at the card */}
+              <div
+                style={caretStyle}
+                className={`fixed z-[101] h-3 w-3 rotate-45 bg-white border-bordergray ${
+                  openUp ? "border-b border-r" : "border-t border-l"
+                }`}
+              />
+              <div
+                role="dialog"
+                style={style}
+                className="fixed z-100 bg-white rounded-xl border border-bordergray shadow-[0_8px_30px_rgba(15,23,42,0.18)] flex flex-col overflow-hidden font-manrope"
+              >
+                {/* Header */}
+                <div className="shrink-0 flex items-center justify-between gap-2 px-3.5 py-2.5 border-b border-bordergray bg-bg-soft/50">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <Package size={12} className="text-select-blue shrink-0" />
+                    <span className="text-[11.5px] font-bold text-textcolor truncate">
+                      {name}
+                    </span>
+                    {mats.length > 0 && (
+                      <span className="text-[9.5px] font-semibold text-text-subtle shrink-0">
+                        ({mats.length})
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setMatPopover(null)}
+                    className="h-6 w-6 flex items-center justify-center rounded-md text-text-subtle hover:text-red-600 hover:bg-red-50 transition-colors shrink-0"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+
+                {/* Body */}
+                <div className="p-3">
+                  {mats.length === 0 ? (
+                    <p className="text-[11px] text-text-subtle py-2 text-center">
+                      No materials. Use Edit Scope to add them.
+                    </p>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-[1fr_1.3fr_92px_28px] gap-2 px-1 mb-1.5 text-[9px] font-bold uppercase tracking-wider text-text-subtle">
+                        <span>Material</span>
+                        <span>Specification</span>
+                        <span className="text-right">Amount</span>
+                        <span />
+                      </div>
+                      {/* Rows scroll (scrollbar hidden) once there are more than
+                          4 materials — the panel height stays fixed at ~4 rows. */}
+                      <div className="space-y-1.5 max-h-[136px] overflow-y-auto scroll-hidden-bar">
+                      {mats.map((m, mIdx) => {
+                        const amt = matAmount(m, mIdx);
+                        return (
+                          <div
+                            key={mIdx}
+                            className="grid grid-cols-[1fr_1.3fr_92px_28px] gap-2 items-stretch"
+                          >
+                            <div className="bg-white border border-bordergray rounded-lg px-2 py-1.5 text-[11px] font-medium text-textcolor truncate">
+                              {m.name || "—"}
+                            </div>
+                            <div className="bg-white border border-bordergray rounded-lg px-2 py-1.5 text-[11px] text-text-muted truncate">
+                              {m.spec || "—"}
+                            </div>
+                            <div
+                              className="bg-white border border-bordergray rounded-lg px-2 py-1.5 text-[11px] font-semibold text-textcolor tabular-nums text-right truncate"
+                              title="Material amount from the rate build-up"
+                            >
+                              {amt > 0
+                                ? `₹${Math.round(amt).toLocaleString("en-IN")}`
+                                : "—"}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => removeMaterial(matPopover.idx, mIdx)}
+                              title="Remove material"
+                              className="h-7 w-7 flex items-center justify-center rounded-md text-text-subtle hover:text-red-500 hover:bg-red-50 transition-colors"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        );
+                      })}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </>
+          );
+        })()}
 
       {previewOpen && (
         <Modal

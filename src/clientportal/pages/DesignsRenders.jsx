@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { getFile, storeFile } from "../../utils/fileStorage";
 import { useOutletContext, useNavigate } from "react-router-dom";
 import PortalStageApproval from "../pages/PortalStageApproval";
@@ -32,16 +32,18 @@ const DesignsRenders = () => {
     formatAmount
   } = useOutletContext();
 
-  const drawings = site?.drawings || [];
-  const revisions = site?.revisions || [];
-  const discussions = site?.discussionHistory || [];
+  const drawings = useMemo(() => site?.drawings || [], [site]);
+  const revisions = useMemo(() => site?.revisions || [], [site]);
+  const discussions = useMemo(() => site?.discussionHistory || [], [site]);
 
   const [localUrls, setLocalUrls] = useState({});
+  const localUrlsRef = useRef({});
+  localUrlsRef.current = localUrls;
 
   useEffect(() => {
     if (!site) return;
     const loadLocalFiles = async () => {
-      const urls = { ...localUrls };
+      const urls = { ...localUrlsRef.current };
       let updated = false;
 
       // 1. drawings

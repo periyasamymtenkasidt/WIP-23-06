@@ -18,8 +18,10 @@ import {
   computeBoqTotals,
   computeItemAmount,
   computeItemQty,
+  computeRateAnalysis,
   resolveGstTreatment,
   DIMENSIONAL_UNITS,
+  BOQ_TYPES,
 } from "../../data/boqStorage";
 import {
   buildTakeoffFromBoq,
@@ -44,6 +46,10 @@ const resolveCompany = (boq) => {
 };
 
 const unitLabelOf = (code) => UNITS.find((u) => u.code === code)?.label || code;
+const boqTypeLabelOf = (value) =>
+  BOQ_TYPES.find((type) => type.value === value)?.label || "Client BOQ";
+
+const compactJoin = (values) => values.filter(Boolean).join(" - ");
 
 const DEFAULT_APPROVAL = {
   preparedBy: "",
@@ -204,12 +210,16 @@ const BOQDocument = ({ boq, totals, gstSplits, company, gst, groupMode = "sectio
       const groups = [];
       const map = {};
       for (const sec of boq.sections) {
-        const key = sec.category || sec.name || "Uncategorized";
-        if (!map[key]) {
-          map[key] = { id: `room_${key}`, name: key, items: [] };
-          groups.push(map[key]);
-        }
         for (const item of sec.items || []) {
+          const key =
+            item.hierarchy?.roomArea ||
+            sec.category ||
+            sec.name ||
+            "Uncategorized";
+          if (!map[key]) {
+            map[key] = { id: `room_${key}`, name: key, items: [] };
+            groups.push(map[key]);
+          }
           map[key].items.push({ ...item, _from: sec.name });
         }
       }
@@ -220,7 +230,11 @@ const BOQDocument = ({ boq, totals, gstSplits, company, gst, groupMode = "sectio
       const map = {};
       for (const sec of boq.sections) {
         for (const item of sec.items || []) {
-          const key = item.description || "Uncategorized";
+          const key =
+            item.hierarchy?.workCategory ||
+            sec.category ||
+            item.description ||
+            "Uncategorized";
           if (!map[key]) {
             map[key] = { id: `work_${key}`, name: key, items: [] };
             groups.push(map[key]);
@@ -265,7 +279,7 @@ const BOQDocument = ({ boq, totals, gstSplits, company, gst, groupMode = "sectio
         </div>
         <div className="text-right">
           <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">
-            Bill of Quantities
+            {boqTypeLabelOf(boq.boqType)}
           </p>
           <p className="text-[16px] font-bold text-select-blue tabular-nums mt-1">
             {boq.id}
@@ -284,6 +298,26 @@ const BOQDocument = ({ boq, totals, gstSplits, company, gst, groupMode = "sectio
 
       {/* ── Title + client/project block ────────────────────────────────── */}
       <h2 className="text-[14px] font-bold text-textcolor mb-3">{boq.title}</h2>
+      {compactJoin([
+        boq.hierarchy?.blockTower || boq.hierarchy?.block || boq.hierarchy?.tower,
+        boq.hierarchy?.floor,
+        boq.hierarchy?.roomArea,
+        boq.hierarchy?.workCategory,
+        boq.hierarchy?.subCategory,
+      ]) && (
+        <p className="text-[10px] text-text-muted -mt-2 mb-3">
+          Hierarchy:{" "}
+          <span className="font-semibold text-textcolor">
+            {compactJoin([
+              boq.hierarchy?.blockTower || boq.hierarchy?.block || boq.hierarchy?.tower,
+              boq.hierarchy?.floor,
+              boq.hierarchy?.roomArea,
+              boq.hierarchy?.workCategory,
+              boq.hierarchy?.subCategory,
+            ])}
+          </span>
+        </p>
+      )}
 
       <div className="grid grid-cols-2 gap-3 mb-6 print-avoid-break">
         <div className="border border-bordergray rounded p-3">
@@ -400,6 +434,40 @@ const BOQDocument = ({ boq, totals, gstSplits, company, gst, groupMode = "sectio
                   {section.items.map((item, iIdx) => {
                     const r = computeItemAmount(item);
                     const qty = computeItemQty(item);
+                    const rateAnalysis = computeRateAnalysis(
+                      item.rateAnalysis,
+                      item.unit,
+                    );
+                    const effectiveRate =
+                      item.rateAnalysis?.enabled && item.rateAnalysis?.useFinalRate
+                        ? rateAnalysis.roundedFinalRate
+                        : Number(item.rate) || 0;
+                    const hierarchyText = compactJoin([
+                      item.hierarchy?.blockTower ||
+                        item.hierarchy?.block ||
+                        item.hierarchy?.tower,
+                      item.hierarchy?.floor,
+                      item.hierarchy?.roomArea,
+                      item.hierarchy?.workCategory,
+                      item.hierarchy?.subCategory,
+                    ]);
+                    const detailText = compactJoin([
+                      item.details?.drawingRefNo &&
+                        `Drawing ${item.details.drawingRefNo}`,
+                      item.details?.drawingRevision &&
+                        `Rev ${item.details.drawingRevision}`,
+                      item.details?.specificationCode &&
+                        `Spec ${item.details.specificationCode}`,
+                      item.details?.brandMakeModel,
+                      item.details?.finishColorGrade,
+                    ]);
+                    const scopeText = compactJoin([
+                      item.details?.itemType,
+                      item.details?.billingType,
+                      item.details?.scopeType,
+                      item.details?.executionBy &&
+                        `By ${item.details.executionBy}`,
+                    ]);
                     return (
                       <tr
                         key={item.id}
@@ -415,6 +483,26 @@ const BOQDocument = ({ boq, totals, gstSplits, company, gst, groupMode = "sectio
                           {item.spec && (
                             <p className="text-[9px] text-text-subtle italic mt-0.5 leading-snug">
                               {item.spec}
+                            </p>
+                          )}
+                          {hierarchyText && (
+                            <p className="text-[8.5px] text-text-muted mt-0.5 leading-snug">
+                              {hierarchyText}
+                            </p>
+                          )}
+                          {detailText && (
+                            <p className="text-[8.5px] text-text-muted mt-0.5 leading-snug">
+                              {detailText}
+                            </p>
+                          )}
+                          {scopeText && (
+                            <p className="text-[8.5px] text-text-subtle mt-0.5 leading-snug">
+                              {scopeText}
+                            </p>
+                          )}
+                          {item.details?.remarks && (
+                            <p className="text-[8.5px] text-text-subtle mt-0.5 leading-snug">
+                              Remarks: {item.details.remarks}
                             </p>
                           )}
                           {(item.materials || []).length > 0 && (
@@ -441,6 +529,24 @@ const BOQDocument = ({ boq, totals, gstSplits, company, gst, groupMode = "sectio
                               ]
                             </p>
                           )}
+                          {(item.measurementRows || []).length > 0 && (
+                            <p className="text-[8.5px] text-text-subtle mt-0.5">
+                              Measurement rows: {item.measurementRows.length}
+                            </p>
+                          )}
+                          {item.rateAnalysis?.enabled && (
+                            <p className="text-[8.5px] text-text-subtle mt-0.5">
+                              RA final rate: {formatINR(rateAnalysis.roundedFinalRate)}
+                              {item.rateAnalysis?.useFinalRate && " used"}
+                            </p>
+                          )}
+                          {(item.vendorComparisons || []).some((v) => v.selected) && (
+                            <p className="text-[8.5px] text-text-subtle mt-0.5">
+                              Vendor:{" "}
+                              {(item.vendorComparisons || []).find((v) => v.selected)
+                                ?.vendorName || "Selected"}
+                            </p>
+                          )}
                           {groupMode !== "section" && item._from && (
                             <p className="text-[8px] text-text-subtle italic mt-0.5">
                               {groupMode === "work"
@@ -459,7 +565,7 @@ const BOQDocument = ({ boq, totals, gstSplits, company, gst, groupMode = "sectio
                           {unitLabelOf(item.unit)}
                         </td>
                         <td className="px-1.5 py-1.5 text-right tabular-nums">
-                          {formatINR(item.rate)}
+                          {formatINR(effectiveRate)}
                         </td>
                         <td className="px-1.5 py-1.5 text-right tabular-nums text-text-muted">
                           {item.gstPercent || 0}%
@@ -506,6 +612,21 @@ const BOQDocument = ({ boq, totals, gstSplits, company, gst, groupMode = "sectio
               value={formatINR(totals.contingencyAmt)}
             />
           )}
+          {totals.freightTransport > 0 && (
+            <Row
+              label="Freight / Transport"
+              value={formatINR(totals.freightTransport)}
+            />
+          )}
+          {totals.loadingUnloading > 0 && (
+            <Row
+              label="Loading / Unloading"
+              value={formatINR(totals.loadingUnloading)}
+            />
+          )}
+          {boq.commercial?.taxInclusive && (
+            <Row label="Tax Mode" value="Tax inclusive" subtle />
+          )}
           {gstSplits.map((g) =>
             gst.interState ? (
               <Row
@@ -529,9 +650,39 @@ const BOQDocument = ({ boq, totals, gstSplits, company, gst, groupMode = "sectio
               </div>
             ),
           )}
+          {Number(totals.roundOff || 0) !== 0 && (
+            <Row label="Round-off" value={formatINR(totals.roundOff)} />
+          )}
           <Row label="GRAND TOTAL" value={formatINR(totals.grandTotal)} bold />
+          {totals.retentionAmt > 0 && (
+            <Row
+              label={`Retention (${totals.retentionPercent}%)`}
+              value={formatINR(totals.retentionAmt)}
+              subtle
+            />
+          )}
+          {totals.mobilizationAdvanceAmt > 0 && (
+            <Row
+              label="Mobilization Advance"
+              value={formatINR(totals.mobilizationAdvanceAmt)}
+              subtle
+            />
+          )}
+          {totals.mobilizationAdvanceAmt > 0 && (
+            <Row
+              label="Net after advance"
+              value={formatINR(totals.netPayableAfterAdvance)}
+              subtle
+            />
+          )}
         </div>
       </div>
+
+      {boq.commercial?.priceEscalationClause && (
+        <p className="text-[9px] text-text-subtle mt-1.5 text-right print-avoid-break">
+          Price escalation: {boq.commercial.priceEscalationClause}
+        </p>
+      )}
 
       {totals.totalGst > 0 && (
         <p className="text-[9px] text-text-subtle mt-1.5 text-right print-avoid-break">
@@ -814,6 +965,23 @@ const Row = ({ label, value, bold, subtle }) => (
 
 const fmtDim = (v) => (Number(v) > 0 ? Number(v).toFixed(2) : "—");
 const fmtQty = (v) => Number(v).toFixed(2);
+const measurementNetQty = (row, unit) => {
+  const explicitQty = Number(row.netQuantity ?? row.qty) || 0;
+  if (explicitQty > 0) return explicitQty;
+  const nos = Number(row.nos) || 1;
+  const L = Number(row.length) || 0;
+  const B = Number(row.breadth ?? row.width) || 0;
+  const H = Number(row.height) || 0;
+  const deduction = Number(row.deduction) || 0;
+  let qty = 0;
+  if (DIMENSIONAL_UNITS[unit]?.kind === "length") {
+    qty = L;
+  } else {
+    const factors = [L, B, H].filter((value) => value > 0);
+    qty = factors.length > 0 ? factors.reduce((p, value) => p * value, 1) : 0;
+  }
+  return Math.max(0, qty * nos - deduction);
+};
 
 const MeasurementDocument = ({ boq, company }) => {
   const initials = (company.name || "")
@@ -848,9 +1016,9 @@ const MeasurementDocument = ({ boq, company }) => {
       for (const item of sec.items || []) {
         total++;
         const info = DIMENSIONAL_UNITS[item.unit];
-        if (item.dimensions?.enabled && info) {
+        if ((item.measurementRows || []).length > 0 || (item.dimensions?.enabled && info)) {
           measuredCount++;
-          if (info.kind === "area") sqftTotal += computeItemQty(item);
+          if (info?.kind === "area") sqftTotal += computeItemQty(item);
         }
       }
     }
@@ -936,16 +1104,22 @@ const MeasurementDocument = ({ boq, company }) => {
                 (No items)
               </p>
             ) : (
-              <table className="w-full border-collapse text-[10px] border border-t-0 border-bordergray">
+              <table className="w-full border-collapse text-[9px] border border-t-0 border-bordergray">
                 <thead>
-                  <tr className="border-b border-bordergray bg-bg-soft text-[9px] font-bold uppercase tracking-wider text-text-muted">
-                    <th className="px-2 py-1.5 text-left w-8">#</th>
-                    <th className="px-2 py-1.5 text-left">Scope of Work</th>
-                    <th className="px-2 py-1.5 text-right w-14">L</th>
-                    <th className="px-2 py-1.5 text-right w-14">B</th>
-                    <th className="px-2 py-1.5 text-right w-14">H</th>
-                    <th className="px-2 py-1.5 text-right w-16">Qty</th>
-                    <th className="px-2 py-1.5 text-left w-12">Unit</th>
+                  <tr className="border-b border-bordergray bg-bg-soft text-[8px] font-bold uppercase tracking-wider text-text-muted">
+                    <th className="px-1 py-1.5 text-left w-7">#</th>
+                    <th className="px-1 py-1.5 text-left w-20">Location</th>
+                    <th className="px-1 py-1.5 text-left">Scope / Description</th>
+                    <th className="px-1 py-1.5 text-right w-10">Nos</th>
+                    <th className="px-1 py-1.5 text-right w-10">L</th>
+                    <th className="px-1 py-1.5 text-right w-10">B</th>
+                    <th className="px-1 py-1.5 text-right w-10">H</th>
+                    <th className="px-1 py-1.5 text-right w-12">Ded.</th>
+                    <th className="px-1 py-1.5 text-right w-14">Net Qty</th>
+                    <th className="px-1 py-1.5 text-left w-10">Unit</th>
+                    <th className="px-1 py-1.5 text-left w-16">Ref</th>
+                    <th className="px-1 py-1.5 text-left w-16">By / Check</th>
+                    <th className="px-1 py-1.5 text-left w-16">Date / Remarks</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -955,7 +1129,7 @@ const MeasurementDocument = ({ boq, company }) => {
                       {sections.length > 1 && (
                         <tr className="bg-active-bg/60">
                           <td
-                            colSpan={7}
+                            colSpan={13}
                             className="px-2 py-1 text-[9.5px] font-semibold text-select-blue italic border-b border-bordergray"
                           >
                             {sec.name}
@@ -969,6 +1143,75 @@ const MeasurementDocument = ({ boq, company }) => {
                         const isLength = info?.kind === "length";
                         const d = item.dimensions;
                         const qty = computeItemQty(item);
+                        const measurementRows = item.measurementRows || [];
+                        if (measurementRows.length > 0) {
+                          return (
+                            <Fragment key={item.id}>
+                              {measurementRows.map((row, rowIdx) => (
+                                <tr
+                                  key={row.id || `${item.id}_${rowIdx}`}
+                                  className="border-b border-bordergray/60 align-top hover:bg-bg-soft/30"
+                                >
+                                  <td className="px-1 py-1.5 tabular-nums text-text-muted">
+                                    {itemCounter}.{rowIdx + 1}
+                                  </td>
+                                  <td className="px-1 py-1.5 text-text-muted">
+                                    {row.location ||
+                                      item.hierarchy?.roomArea ||
+                                      "—"}
+                                  </td>
+                                  <td className="px-1 py-1.5">
+                                    <p className="text-textcolor leading-snug">
+                                      {item.description || "—"}
+                                    </p>
+                                    {(row.description || item.spec) && (
+                                      <p className="text-[8.5px] text-text-subtle mt-0.5 leading-snug">
+                                        {row.description || item.spec}
+                                      </p>
+                                    )}
+                                  </td>
+                                  <td className="px-1 py-1.5 text-right tabular-nums text-text-muted">
+                                    {Number(row.nos || 0) > 0 ? row.nos : "—"}
+                                  </td>
+                                  <td className="px-1 py-1.5 text-right tabular-nums text-text-muted">
+                                    {fmtDim(row.length)}
+                                  </td>
+                                  <td className="px-1 py-1.5 text-right tabular-nums text-text-muted">
+                                    {fmtDim(row.breadth ?? row.width)}
+                                  </td>
+                                  <td className="px-1 py-1.5 text-right tabular-nums text-text-muted">
+                                    {fmtDim(row.height)}
+                                  </td>
+                                  <td className="px-1 py-1.5 text-right tabular-nums text-text-muted">
+                                    {Number(row.deduction || 0) > 0
+                                      ? fmtQty(row.deduction)
+                                      : "—"}
+                                  </td>
+                                  <td className="px-1 py-1.5 text-right tabular-nums font-semibold text-textcolor">
+                                    {fmtQty(measurementNetQty(row, item.unit))}
+                                  </td>
+                                  <td className="px-1 py-1.5 text-text-muted">
+                                    {unitLabelOf(row.unit || item.unit)}
+                                  </td>
+                                  <td className="px-1 py-1.5 text-text-muted">
+                                    {row.drawingPhotoRef || "—"}
+                                  </td>
+                                  <td className="px-1 py-1.5 text-text-muted">
+                                    {compactJoin([row.measuredBy, row.checkedBy]) ||
+                                      "—"}
+                                  </td>
+                                  <td className="px-1 py-1.5 text-text-muted">
+                                    {compactJoin([
+                                      row.measurementDate &&
+                                        formatDate(row.measurementDate),
+                                      row.remarks,
+                                    ]) || "—"}
+                                  </td>
+                                </tr>
+                              ))}
+                            </Fragment>
+                          );
+                        }
                         return (
                           <tr
                             key={item.id}
@@ -977,6 +1220,9 @@ const MeasurementDocument = ({ boq, company }) => {
                             <td className="px-2 py-1.5 tabular-nums text-text-muted">
                               {itemCounter}
                             </td>
+                            <td className="px-1 py-1.5 text-text-muted">
+                              {item.hierarchy?.roomArea || label || "—"}
+                            </td>
                             <td className="px-2 py-1.5">
                               <p className="text-textcolor leading-snug">{item.description || "—"}</p>
                               {item.spec && (
@@ -984,6 +1230,9 @@ const MeasurementDocument = ({ boq, company }) => {
                                   {item.spec}
                                 </p>
                               )}
+                            </td>
+                            <td className="px-1 py-1.5 text-right tabular-nums text-text-muted">
+                              —
                             </td>
                             <td className="px-2 py-1.5 text-right tabular-nums text-text-muted">
                               {hasDims ? fmtDim(d.length) : "—"}
@@ -994,11 +1243,21 @@ const MeasurementDocument = ({ boq, company }) => {
                             <td className="px-2 py-1.5 text-right tabular-nums text-text-muted">
                               {hasDims && !isLength ? fmtDim(d.height) : "—"}
                             </td>
+                            <td className="px-1 py-1.5 text-right tabular-nums text-text-muted">
+                              —
+                            </td>
                             <td className="px-2 py-1.5 text-right tabular-nums font-semibold text-textcolor">
                               {fmtQty(qty)}
                             </td>
                             <td className="px-2 py-1.5 text-text-muted">
                               {unitLabelOf(item.unit)}
+                            </td>
+                            <td className="px-1 py-1.5 text-text-muted">
+                              {item.details?.drawingRefNo || "—"}
+                            </td>
+                            <td className="px-1 py-1.5 text-text-muted">—</td>
+                            <td className="px-1 py-1.5 text-text-muted">
+                              {item.details?.remarks || "—"}
                             </td>
                           </tr>
                         );

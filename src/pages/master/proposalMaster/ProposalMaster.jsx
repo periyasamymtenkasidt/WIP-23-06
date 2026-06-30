@@ -208,7 +208,7 @@ const getCategory = (area) => {
 
 const ProposalMaster = () => {
   const [master, setMaster] = useState(() => getMaster());
-  const [isInitial, setIsInitial] = useState(true);
+  const isInitialRef = useRef(true);
   const [activeKey, setActiveKey] = useState(() => {
     const keys = Object.keys(getMaster());
     return keys[0] || "2BHK";
@@ -332,8 +332,8 @@ const ProposalMaster = () => {
   // Every edit to `master` is persisted immediately — there is no separate
   // "Save Changes" step, so this is the only place that writes to storage.
   useEffect(() => {
-    if (isInitial) {
-      setIsInitial(false);
+    if (isInitialRef.current) {
+      isInitialRef.current = false;
       return;
     }
     saveMaster(master);
@@ -352,12 +352,12 @@ const ProposalMaster = () => {
   const askConfirm = (cfg) => setConfirmDialog(cfg);
 
   // Preset-level updates (e.g. label)
-  const updateActive = (changes) => {
+  const updateActive = useCallback((changes) => {
     setMaster((prev) => ({
       ...prev,
       [activeKey]: { ...prev[activeKey], ...changes },
     }));
-  };
+  }, [activeKey]);
 
   // Automatically update the preset label based on key and active config property
   // type. When there is no property type, fall back to the formatted key alone so
@@ -375,7 +375,7 @@ const ProposalMaster = () => {
     if (generatedLabel && active.label !== generatedLabel) {
       updateActive({ label: generatedLabel });
     }
-  }, [activeKey, activeConfig?.propertyType, active]);
+  }, [activeKey, activeConfig?.propertyType, active, updateActive]);
 
   // Automatically normalize the configuration's estimator fields if missing
   useEffect(() => {

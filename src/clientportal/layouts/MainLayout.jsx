@@ -368,11 +368,45 @@ const MainLayout = () => {
   // Gallery items (Moodboards, Drawings, Renders)
   const [gallery, setGallery] = useState([]);
 
+  const generateDefaultMilestones = (cid, cData) => {
+    const val = parseBudget(cData.budget);
+    const initialMilestones = PAYMENT_MILESTONES.map((m) => {
+      const base = Math.round(val * (m.pct / 100));
+      const gstAmt = Math.round(base * 0.18);
+      const total = base + gstAmt;
+      return {
+        id: m.id,
+        name: m.name,
+        pct: m.pct,
+        base,
+        gstAmt,
+        total,
+        status: m.id === 1 ? "paid" : "pending",
+        paidDate: m.id === 1 ? "15.05.2026" : "",
+      };
+    });
+    localStorage.setItem(`clientMilestones_${cid}`, JSON.stringify(initialMilestones));
+    setMilestones(initialMilestones);
+  };
+
+  const loadMilestones = (cid, cData) => {
+    const saved = localStorage.getItem(`clientMilestones_${cid}`);
+    if (saved) {
+      try {
+        setMilestones(JSON.parse(saved));
+      } catch (e) {
+        generateDefaultMilestones(cid, cData);
+      }
+    } else {
+      generateDefaultMilestones(cid, cData);
+    }
+  };
+
   useEffect(() => {
     if (routeClientId && routeClientId !== clientId) {
       setClientId(routeClientId);
     }
-  }, [routeClientId]);
+  }, [routeClientId, clientId]);
 
   useEffect(() => {
     const activeId = clientId;
@@ -387,6 +421,7 @@ const MainLayout = () => {
       setClient(cData);
       loadMilestones(activeId, cData);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
 
   // Load and merge admin drawings
@@ -463,40 +498,6 @@ const MainLayout = () => {
       localStorage.setItem(`clientMessages_${clientId}`, JSON.stringify(messages));
     }
   }, [messages, clientId]);
-
-  const loadMilestones = (cid, cData) => {
-    const saved = localStorage.getItem(`clientMilestones_${cid}`);
-    if (saved) {
-      try {
-        setMilestones(JSON.parse(saved));
-      } catch (e) {
-        generateDefaultMilestones(cid, cData);
-      }
-    } else {
-      generateDefaultMilestones(cid, cData);
-    }
-  };
-
-  const generateDefaultMilestones = (cid, cData) => {
-    const val = parseBudget(cData.budget);
-    const initialMilestones = PAYMENT_MILESTONES.map((m) => {
-      const base = Math.round(val * (m.pct / 100));
-      const gstAmt = Math.round(base * 0.18);
-      const total = base + gstAmt;
-      return {
-        id: m.id,
-        name: m.name,
-        pct: m.pct,
-        base,
-        gstAmt,
-        total,
-        status: m.id === 1 ? "paid" : "pending",
-        paidDate: m.id === 1 ? "15.05.2026" : "",
-      };
-    });
-    localStorage.setItem(`clientMilestones_${cid}`, JSON.stringify(initialMilestones));
-    setMilestones(initialMilestones);
-  };
 
   const handleCreateAppointment = (subject, date, time) => {
     if (!subject || !date || !time) return;

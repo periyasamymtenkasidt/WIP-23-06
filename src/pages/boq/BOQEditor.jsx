@@ -39,6 +39,7 @@ import {
   Eye,
   History,
   List,
+  MapPin,
 } from "lucide-react";
 import {
   createBoq,
@@ -49,11 +50,21 @@ import {
   computeItemAmount,
   computeItemQty,
   computeBoqTotals,
+  computeRateAnalysis,
   resolveGstTreatment,
   validateBoqForSend,
   blankItem,
   blankSection,
+  blankMeasurementRow,
+  blankRateAnalysisRow,
+  blankVendorComparison,
   DIMENSIONAL_UNITS,
+  DEFAULT_BOQ_APPROVAL,
+  BOQ_TYPES,
+  ITEM_TYPES,
+  BILLING_TYPES,
+  SCOPE_TYPES,
+  EXECUTION_BY,
 } from "../../data/boqStorage";
 import { getOrgProfile } from "../../data/orgProfile";
 import { PAYMENT_MILESTONES } from "../../data/MilestoneConfig";
@@ -96,12 +107,17 @@ import {
   materialsById as mkMatById,
   recipeToMaterials,
 } from "../../data/rateBuildup";
+import { getDesignFlow, buildBoq } from "../../data/designFlowStorage";
+import { getElementMeasurement } from "../../data/surveyMeasureStorage";
+import { getAllSites } from "../../data/siteStorage";
 
 const inputBase =
   "bg-white border border-bordergray text-[12px] text-textcolor rounded-lg px-3 py-2 w-full focus:outline-none focus:border-select-blue focus:ring-2 focus:ring-select-blue/15 transition-all placeholder:text-text-subtle";
 
 const compactInput =
   "bg-white border border-bordergray text-[11.5px] text-textcolor rounded-md px-2 py-1.5 w-full focus:outline-none focus:border-select-blue focus:ring-1 focus:ring-select-blue/20 placeholder:text-text-subtle";
+
+const unitLabelOf = (code) => UNITS.find((u) => u.code === code)?.label || code || "";
 
 const STATUS_STYLES = {
   draft: {
@@ -147,24 +163,7 @@ const isLockedStatus = (status) => LOCKED_STATUSES.includes(status);
 const SIGNOFF_LOCKED_STATUSES = ["signed", "issued_for_procurement", "procurement"];
 const isSignoffLockedStatus = (status) => SIGNOFF_LOCKED_STATUSES.includes(status);
 
-const DEFAULT_APPROVAL = {
-  preparedBy: "",
-  reviewedBy: "",
-  approvedBy: "",
-  clientAcceptedBy: "",
-  preparedAt: "",
-  sentAt: "",
-  reviewedAt: "",
-  approvedAt: "",
-  clientAcceptedAt: "",
-  checklist: {
-    measurementsChecked: false,
-    ratesChecked: false,
-    taxChecked: false,
-    termsChecked: false,
-  },
-  remarks: "",
-};
+const DEFAULT_APPROVAL = DEFAULT_BOQ_APPROVAL;
 
 const mergeApproval = (approval = {}) => ({
   ...DEFAULT_APPROVAL,
@@ -198,6 +197,23 @@ const appendAuditTrail = (boq, entry) => [
   createAuditEntry({ boq, ...entry }),
 ];
 
+const createRevisionComparison = (boq, nextRevision) => ({
+  previousRevision: boq?.revision || 1,
+  currentRevision: nextRevision,
+  createdAt: new Date().toISOString(),
+  summary: {
+    sectionsAdded: 0,
+    sectionsRemoved: 0,
+    itemsAdded: 0,
+    itemsRemoved: 0,
+    itemsChanged: 0,
+    quantityDelta: 0,
+    amountDelta: 0,
+  },
+  changes: [],
+  reason: "",
+});
+
 const DEFAULT_PROCUREMENT = {
   issued: false,
   issuedAt: "",
@@ -229,6 +245,7 @@ const BOQEditor = () => {
   // { blocks, warnings } from validateBoqForSend, shown in SendValidationDialog.
   const [sendValidation, setSendValidation] = useState(null);
   const [showSeedPicker, setShowSeedPicker] = useState(false);
+  const [showSurveyPicker, setShowSurveyPicker] = useState(false);
   const [libraryPickerSection, setLibraryPickerSection] = useState(null);
   const [showSectionPicker, setShowSectionPicker] = useState(false);
   // Section id currently adding a line item through the full Item Form modal.
@@ -426,6 +443,8 @@ const BOQEditor = () => {
       unit: form.unit || "nos",
       rate: Number(form.rate) || 0,
       gstPercent: Number(form.gstPercent) || 18,
+      hierarchy: base.hierarchy || {},
+      details: base.details || {},
       dimensions: {
         enabled: L > 0 || B > 0 || H > 0,
         length: L,
@@ -433,6 +452,9 @@ const BOQEditor = () => {
         height: H,
       },
       materials: form.materials ? form.materials.map((m) => ({ ...m })) : [],
+      measurementRows: base.measurementRows || [],
+      rateAnalysis: base.rateAnalysis || {},
+      vendorComparisons: base.vendorComparisons || [],
     };
   };
 
@@ -823,6 +845,7 @@ const BOQEditor = () => {
   };
 
   const handleCreateRevision = () => {
+    const nextRevision = Number(boq.revision || 1) + 1;
     setConfirmDialog({
       title: "Create editable revision?",
       message: `${boq.id} Rev ${boq.revision || 1} is ${boq.status}. This will unlock a new draft revision while preserving the same BOQ record.`,
@@ -830,7 +853,7 @@ const BOQEditor = () => {
       onConfirm: () => {
         updateInternal({
           status: "draft",
-          revision: (Number(boq.revision) || 1) + 1,
+          revision: nextRevision,
           orgSnapshot: null,
           procurement: DEFAULT_PROCUREMENT,
           approval: {
@@ -857,14 +880,15 @@ const BOQEditor = () => {
               approval: mergeApproval(boq.approval),
             },
           ],
+          revisionComparison: createRevisionComparison(boq, nextRevision),
           auditTrail: appendAuditTrail(boq, {
             action: "revision_created",
             label: "Revision Created",
             actor: "System",
-            details: `Revision ${Number(boq.revision || 1) + 1} opened from ${boq.status}.`,
+            details: `Revision ${nextRevision} opened from ${boq.status}.`,
           }),
         });
-        showToast(`Revision ${Number(boq.revision || 1) + 1} created`, "success");
+        showToast(`Revision ${nextRevision} created`, "success");
       },
     });
   };
@@ -875,6 +899,150 @@ const BOQEditor = () => {
       navigate(`/boq/${next.id}`);
       showToast(`Duplicated as ${next.id}`, "success");
     }
+  };
+
+  const handleSyncHsnFromMaster = () => {
+    const library = listLibrary();
+    // Build two lookups: by masterId (exact) and by description (fuzzy fallback)
+    const masterById = {};
+    const masterByDesc = {};
+    for (const l of library) {
+      if (l.id) masterById[l.id] = l;
+      if (l.description) masterByDesc[l.description.toLowerCase().trim()] = l;
+    }
+
+    let updated = 0;
+    const newSections = (boq.sections || []).map((s) => ({
+      ...s,
+      items: (s.items || []).map((it) => {
+        const master =
+          (it.masterId ? masterById[it.masterId] : null) ||
+          masterByDesc[(it.description || "").toLowerCase().trim()];
+        const masterHsn = master?.hsn || "";
+        if (masterHsn && it.hsn !== masterHsn) {
+          updated++;
+          return { ...it, hsn: masterHsn };
+        }
+        return it;
+      }),
+    }));
+
+    if (updated > 0) {
+      updateInternal({ sections: newSections });
+    }
+    showToast(
+      updated > 0
+        ? `HSN synced for ${updated} item${updated === 1 ? "" : "s"} from Item Master`
+        : "No items matched Item Master entries with HSN set",
+      updated > 0 ? "success" : "info",
+    );
+  };
+
+  const handleGenerateFromSurvey = () => {
+    const siteID = boq.siteID || boq.project?.siteID;
+    if (!siteID) {
+      setShowSurveyPicker(true);
+      return;
+    }
+    runGenerateFromSurvey(siteID);
+  };
+
+  const runGenerateFromSurvey = (siteID) => {
+    const flow = getDesignFlow(siteID);
+    if (!flow?.siteBasis) {
+      showToast("No frozen survey found for this site.", "info");
+      return;
+    }
+    const surveyBoq = buildBoq(flow);
+    if (!surveyBoq?.areas?.length) {
+      showToast("Survey has no measured items to generate from.", "info");
+      return;
+    }
+    const totalItems = surveyBoq.areas.reduce((s, a) => s + a.rows.length, 0);
+    setConfirmDialog({
+      title: "Generate from Survey",
+      message: `Populate ${surveyBoq.areas.length} section(s) with ${totalItems} item(s) from the frozen site survey. Existing manual sections are preserved.`,
+      confirmLabel: "Generate",
+      onConfirm: () => {
+        const existingSections = boq.sections || [];
+        const surveyAreaNames = new Set(surveyBoq.areas.map((a) => a.area));
+        const generatedSections = surveyBoq.areas.map((area) => {
+          const existingSection = existingSections.find((s) => s.name === area.area);
+          const matchedIds = new Set();
+          const items = area.rows.map((row) => {
+            const existing = (existingSection?.items || []).find(
+              (it) =>
+                (row.scopeItemId && it.scopeItemId === row.scopeItemId) ||
+                it.description === row.name,
+            );
+            if (existing) matchedIds.add(existing.id);
+            const d = getElementMeasurement(
+              flow.siteBasis?.measurements,
+              area.area,
+              row,
+            );
+            const hasDims = [d.length, d.breadth ?? d.width, d.height].some(
+              (v) => Number(v) > 0,
+            );
+            const newItem = blankItem();
+            return {
+              ...newItem,
+              ...existing,
+              id: existing?.id || newItem.id,
+              scopeItemId: row.scopeItemId || existing?.scopeItemId || null,
+              masterId: row.masterId || existing?.masterId || null,
+              description: row.name,
+              spec: row.selectedMaterial?.specifications || row.selectedMaterial?.spec || existing?.spec || "",
+              hsn: row.selectedMaterial?.hsn || existing?.hsn || "",
+              qty: row.measuredQty,
+              unit: row.unit,
+              rate: row.rate,
+              gstPercent: row.selectedMaterial?.gstPercent ?? existing?.gstPercent ?? 18,
+              discount: existing?.discount || { type: "percent", value: 0 },
+              materials: row.materials || existing?.materials || [],
+              dimensions: {
+                enabled: hasDims,
+                length: Number(d.length) || 0,
+                breadth: Number(d.breadth ?? d.width) || 0,
+                height: Number(d.height) || 0,
+                nos: Number(d.nos) || 1,
+              },
+              siteSurveySource: true,
+              siteID,
+              quotedQty: row.quotedQty,
+              quotedAmount: row.quotedAmount,
+              measuredQty: row.measuredQty,
+              surveyVariance: row.variance,
+            };
+          });
+          return {
+            id: existingSection?.id || blankSection().id,
+            name: area.area,
+            category: area.area,
+            items: [
+              ...items,
+              ...(existingSection?.items || []).filter(
+                (it) => !matchedIds.has(it.id) && !it.siteSurveySource,
+              ),
+            ],
+          };
+        });
+        const merged = [
+          ...generatedSections,
+          ...existingSections.filter((s) => !surveyAreaNames.has(s.name)),
+        ];
+        updateInternal({
+          sections: merged,
+          siteID,
+          surveyFrozenAt: flow.siteBasis?.frozenAt || null,
+          quotedTotal: surveyBoq.quotedTotal,
+        });
+        showToast(
+          `Generated ${surveyBoq.areas.length} section(s) with ${totalItems} item(s) from survey`,
+          "success",
+        );
+      },
+    });
   };
 
   const handleDelete = () => {
@@ -930,6 +1098,27 @@ const BOQEditor = () => {
   }, [boq]);
 
   const totals = useMemo(() => (boq ? computeBoqTotals(boq) : null), [boq]);
+
+  const roomBreakdown = useMemo(() => {
+    if (!boq?.sections?.length) return [];
+    const groups = {};
+    for (const sec of boq.sections) {
+      const key = sec.category || sec.name || "Other";
+      if (!groups[key]) groups[key] = { category: key, sectionIds: [], net: 0, gst: 0, itemCount: 0 };
+      groups[key].sectionIds.push(sec.id);
+      for (const item of sec.items || []) {
+        const r = computeItemAmount(item);
+        groups[key].net += r.net;
+        groups[key].gst += r.gst;
+        groups[key].itemCount += 1;
+      }
+    }
+    return Object.values(groups).sort((a, b) => b.net - a.net);
+  }, [boq?.sections]);
+
+  const scrollToSection = (sectionId) => {
+    document.getElementById(`section-${sectionId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
   const gst = useMemo(
     () => (boq ? resolveGstTreatment(boq) : null),
     [boq],
@@ -1167,6 +1356,26 @@ const BOQEditor = () => {
                       type="button"
                       onClick={() => {
                         setShowHeaderMenu(false);
+                        handleSyncHsnFromMaster();
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-[12px] font-semibold text-text-muted hover:bg-bg-soft hover:text-textcolor"
+                    >
+                      <Hash size={13} /> Sync HSN from Item Master
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowHeaderMenu(false);
+                        handleGenerateFromSurvey();
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-[12px] font-semibold text-text-muted hover:bg-bg-soft hover:text-textcolor border-t border-bordergray"
+                    >
+                      <Ruler size={13} /> Generate from Survey
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowHeaderMenu(false);
                         handleDelete();
                       }}
                       className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-[12px] font-semibold text-red-500 hover:bg-red-50"
@@ -1186,9 +1395,36 @@ const BOQEditor = () => {
               <div className="flex items-start gap-2">
                 <ShieldCheck size={14} className="mt-0.5 shrink-0" />
                 <p className="text-[11.5px] leading-relaxed">
-                  This BOQ is issued as <b>{boq.status}</b>. It is read-only to
-                  protect the controlled version. Create a revision to make
-                  changes.
+                  {boq.status === "signed" ? (
+                    <>
+                      This BOQ is <b>signed</b>. Editing is locked — click{" "}
+                      <b>Issue Procurement</b> in the toolbar to proceed, or{" "}
+                      <b>Create Revision</b> to reopen it for editing.
+                    </>
+                  ) : boq.status === "issued_for_procurement" ? (
+                    <>
+                      This BOQ has been <b>issued for procurement</b>. It is
+                      read-only to protect the controlled version. Create a
+                      revision if changes are needed.
+                    </>
+                  ) : boq.status === "procurement" ? (
+                    <>
+                      This BOQ is under active <b>procurement</b>. It is
+                      read-only to protect the controlled version. Create a
+                      revision if changes are needed.
+                    </>
+                  ) : (
+                    <>
+                      This BOQ is{" "}
+                      <b>
+                        {boq.status === "issued_for_tender"
+                          ? "issued for tender"
+                          : boq.status}
+                      </b>
+                      . It is read-only to protect the controlled version.
+                      Create a revision to make changes.
+                    </>
+                  )}
                 </p>
               </div>
             </div>
@@ -1342,6 +1578,20 @@ const BOQEditor = () => {
                     className={`${inputBase} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
                   />
                 </Field>
+                <Field icon={<FileText size={11} />} label="BOQ Type">
+                  <select
+                    value={boq.boqType || "client"}
+                    onChange={(e) => update({ boqType: e.target.value })}
+                    disabled={isLocked}
+                    className={`${inputBase} cursor-pointer disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+                  >
+                    {BOQ_TYPES.map((type) => (
+                      <option key={type.value} value={type.value}>
+                        {type.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
                 <Field icon={<ShieldCheck size={11} />} label="Warranty / Defect Liability">
                   <input
                     type="text"
@@ -1352,6 +1602,39 @@ const BOQEditor = () => {
                     className={`${inputBase} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
                   />
                 </Field>
+                <div className="sm:col-span-2 lg:col-span-4 rounded-xl border border-bordergray bg-bg-soft/40 p-3">
+                  <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-text-muted">
+                    <Layers size={11} className="text-select-blue" />
+                    Project hierarchy
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2">
+                    {[
+                      ["block", "Block"],
+                      ["tower", "Tower"],
+                      ["floor", "Floor"],
+                      ["roomArea", "Room / Area"],
+                      ["workCategory", "Work Category"],
+                      ["subCategory", "Sub-category"],
+                    ].map(([key, label]) => (
+                      <input
+                        key={key}
+                        type="text"
+                        value={boq.hierarchy?.[key] || ""}
+                        onChange={(e) =>
+                          update({
+                            hierarchy: {
+                              ...(boq.hierarchy || {}),
+                              [key]: e.target.value,
+                            },
+                          })
+                        }
+                        disabled={isLocked}
+                        placeholder={label}
+                        className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+                      />
+                    ))}
+                  </div>
+                </div>
                 {(boq.client?.phone ||
                   boq.client?.email ||
                   boq.project?.address) && (
@@ -1708,6 +1991,7 @@ const BOQEditor = () => {
                 return (
                   <div
                     key={section.id}
+                    id={`section-${section.id}`}
                     className="bg-white rounded-2xl border border-bordergray shadow-[0_1px_3px_rgba(15,23,42,0.04)] overflow-hidden"
                   >
                     {/* Section header */}
@@ -1946,6 +2230,52 @@ const BOQEditor = () => {
 
           {/* ── Right: Summary, terms, notes ────────────────────────────── */}
           <aside className="space-y-5 lg:overflow-y-auto lg:pr-1 lg:pb-6 scroll-hidden-bar">
+
+            {/* Room Breakdown */}
+            {roomBreakdown.length > 0 && (
+              <section className="bg-white rounded-2xl border border-bordergray shadow-[0_1px_3px_rgba(15,23,42,0.04)] overflow-hidden">
+                <div className="px-4 py-3 border-b border-bordergray flex items-center gap-2 bg-linear-to-r from-violet-50 to-white">
+                  <Layers size={13} className="text-violet-600" />
+                  <h3 className="text-[12px] font-bold text-textcolor">Room Breakdown</h3>
+                  <span className="ml-auto text-[10px] text-text-subtle font-medium">{roomBreakdown.length} rooms</span>
+                </div>
+                <div className="p-3 space-y-1">
+                  {roomBreakdown.map((room) => {
+                    const pct = totals.taxable > 0 ? (room.net / totals.taxable) * 100 : 0;
+                    const c = roomColor(room.category);
+                    return (
+                      <button
+                        key={room.category}
+                        type="button"
+                        onClick={() => scrollToSection(room.sectionIds[0])}
+                        className="w-full rounded-xl px-3 py-2.5 text-left hover:bg-bg-soft transition-colors"
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className={`h-2 w-2 shrink-0 rounded-full ${c.dot}`} />
+                            <span className="text-[12px] font-semibold text-textcolor truncate">{room.category}</span>
+                            <span className="text-[10px] text-text-subtle shrink-0">{room.itemCount}</span>
+                          </div>
+                          <span className="text-[12px] font-bold text-textcolor tabular-nums shrink-0">
+                            {formatAmount(room.net)}
+                          </span>
+                        </div>
+                        <div className="h-1 w-full rounded-full bg-bg-soft overflow-hidden">
+                          <div className={`h-full rounded-full transition-all ${c.bar}`} style={{ width: `${Math.min(100, pct)}%` }} />
+                        </div>
+                      </button>
+                    );
+                  })}
+                  {roomBreakdown.length > 1 && (
+                    <div className="mt-2 flex items-center justify-between border-t border-bordergray pt-2.5 px-3">
+                      <span className="text-[10.5px] font-bold text-text-muted uppercase tracking-wide">Total (pre-GST)</span>
+                      <span className="text-[13px] font-bold text-textcolor tabular-nums">{formatAmount(totals.taxable)}</span>
+                    </div>
+                  )}
+                </div>
+              </section>
+            )}
+
             {/* Totals */}
             <section className="bg-white rounded-2xl border border-bordergray shadow-[0_1px_3px_rgba(15,23,42,0.04)] overflow-hidden">
               <div className="px-4 py-3 border-b border-bordergray flex items-center gap-2 bg-linear-to-r from-select-blue/5 to-white">
@@ -2049,6 +2379,104 @@ const BOQEditor = () => {
                     value={formatAmount(totals.baseForGst)}
                   />
                 )}
+
+                <div className="border-t border-bordergray pt-2 mt-2 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted">
+                      Commercial controls
+                    </span>
+                    <label className="flex items-center gap-1.5 text-[10px] font-semibold text-text-muted">
+                      <input
+                        type="checkbox"
+                        checked={!!boq.commercial?.taxInclusive}
+                        onChange={(e) =>
+                          update({
+                            commercial: {
+                              ...(boq.commercial || {}),
+                              taxInclusive: e.target.checked,
+                            },
+                          })
+                        }
+                        disabled={isLocked}
+                        className="h-3 w-3 accent-select-blue"
+                      />
+                      Tax inclusive
+                    </label>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      ["retentionPercent", "Retention %", "%"],
+                      ["mobilizationAdvance", "Mobilization", "₹"],
+                      ["freightTransport", "Freight", "₹"],
+                      ["loadingUnloading", "Loading", "₹"],
+                      ["roundOff", "Round-off", "₹"],
+                    ].map(([key, label, suffix]) => (
+                      <label key={key} className="block">
+                        <span className="mb-0.5 block text-[9.5px] font-semibold text-text-subtle">
+                          {label}
+                        </span>
+                        <div className="relative">
+                          <input
+                            type="number"
+                            value={boq.commercial?.[key] || 0}
+                            onChange={(e) =>
+                              update({
+                                commercial: {
+                                  ...(boq.commercial || {}),
+                                  [key]: Number(e.target.value) || 0,
+                                },
+                              })
+                            }
+                            disabled={isLocked}
+                            className={`${compactInput} pr-6 text-right tabular-nums disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+                          />
+                          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] text-text-subtle">
+                            {suffix}
+                          </span>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                  {(totals.freightTransport > 0 || totals.loadingUnloading > 0) && (
+                    <Row
+                      label="Commercial additions"
+                      value={formatAmount(totals.commercialAdditions)}
+                    />
+                  )}
+                  {totals.roundOff !== 0 && (
+                    <Row
+                      label="Round-off"
+                      value={formatAmount(totals.roundOff)}
+                    />
+                  )}
+                  {totals.retentionAmt > 0 && (
+                    <Row
+                      label={`Retention (${totals.retentionPercent}%)`}
+                      value={formatAmount(totals.retentionAmt)}
+                    />
+                  )}
+                  {totals.mobilizationAdvanceAmt > 0 && (
+                    <Row
+                      label="After mobilization advance"
+                      value={formatAmount(totals.netPayableAfterAdvance)}
+                    />
+                  )}
+                  <textarea
+                    value={boq.commercial?.priceEscalationClause || ""}
+                    onChange={(e) =>
+                      update({
+                        commercial: {
+                          ...(boq.commercial || {}),
+                          priceEscalationClause: e.target.value,
+                        },
+                      })
+                    }
+                    disabled={isLocked}
+                    rows={2}
+                    placeholder="Price escalation clause"
+                    className={`${compactInput} resize-none disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+                  />
+                </div>
 
                 <div className="border-t border-bordergray pt-2 space-y-1">
                   {Object.entries(totals.gstByRate || {})
@@ -2368,27 +2796,6 @@ const BOQEditor = () => {
               </div>
             </CollapsiblePanel>
 
-            {/*  Included */}
-            <BulletListEditor
-              title="Included"
-              icon={<CheckCircle2 size={13} className="text-emerald-600" />}
-              accent="emerald"
-              items={boq.inclusions || []}
-              placeholder="e.g. 3D visualization of all rooms"
-              onChange={(next) => update({ inclusions: next })}
-              disabled={isLocked}
-            />
-
-            {/* Not Included */}
-            <BulletListEditor
-              title="Not Included"
-              icon={<X size={13} className="text-red-500" />}
-              accent="red"
-              items={boq.exclusions || []}
-              placeholder="e.g. Civil work — demolition, plumbing"
-              onChange={(next) => update({ exclusions: next })}
-              disabled={isLocked}
-            />
           </aside>
         </div>
       </div>
@@ -2425,6 +2832,17 @@ const BOQEditor = () => {
         <SeedPicker
           onClose={() => setShowSeedPicker(false)}
           onPick={seedFromPreset}
+        />
+      )}
+
+      {/* Survey site picker — shown when BOQ has no siteID yet */}
+      {showSurveyPicker && (
+        <SurveyLinker
+          onClose={() => setShowSurveyPicker(false)}
+          onPick={(siteID) => {
+            setShowSurveyPicker(false);
+            runGenerateFromSurvey(siteID);
+          }}
         />
       )}
 
@@ -2530,6 +2948,11 @@ const ItemRow = ({
 }) => {
   const r = computeItemAmount(item);
   const computedQty = computeItemQty(item);
+  const rateAnalysis = computeRateAnalysis(item.rateAnalysis, item.unit);
+  const effectiveRate =
+    item.rateAnalysis?.enabled && item.rateAnalysis?.useFinalRate
+      ? rateAnalysis.roundedFinalRate
+      : Number(item.rate) || 0;
   const hasSurveyDrift =
     item.siteSurveySource &&
     Math.abs(computedQty - (Number(item.siteMeasuredQty) || 0)) > 0.001;
@@ -2549,8 +2972,31 @@ const ItemRow = ({
       isLinked ||
       !!item.spec ||
       !!item.hsn ||
-      (item.materials || []).length > 0,
+      (item.materials || []).length > 0 ||
+      (item.measurementRows || []).length > 0 ||
+      !!item.rateAnalysis?.enabled ||
+      (item.vendorComparisons || []).length > 0,
   );
+
+  // Resolve HSN from Item Master when item is linked — scope-of-work HSN
+  // lives on the library record, not on the material rows.
+  const masterHsn = useMemo(
+    () =>
+      item.masterId
+        ? (listLibrary().find((l) => l.id === item.masterId)?.hsn || "")
+        : "",
+    [item.masterId],
+  );
+
+  // Auto-populate item.hsn from Item Master on first render if still empty.
+  useEffect(() => {
+    if (!item.hsn && masterHsn && !disabled) {
+      onUpdate({ hsn: masterHsn });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [masterHsn]);
+
+  const effectiveHsn = item.hsn || masterHsn;
 
   const updateDim = (changes) =>
     onUpdate({ dimensions: { ...(item.dimensions || {}), ...changes } });
@@ -2590,22 +3036,17 @@ const ItemRow = ({
           <AlertTriangle size={9} /> Variation
         </span>
       )}
-    </div>
-  );
-
-  const summaryLine = (
-    <p className="mt-1 text-[10.5px] text-text-muted">
-      HSN <span className="font-semibold text-textcolor">{item.hsn || "-"}</span>
-      {(item.materials || []).length > 0 && (
-        <>
-          {" | "}
-          <span className="font-semibold text-textcolor">
-            {(item.materials || []).length} material
-            {(item.materials || []).length === 1 ? "" : "s"}
-          </span>
-        </>
+      {(item.measurementRows || []).length > 0 && (
+        <span className="inline-flex shrink-0 items-center gap-0.5 rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[9px] font-bold text-blue-700">
+          <Ruler size={9} /> Measurement
+        </span>
       )}
-    </p>
+      {item.rateAnalysis?.enabled && (
+        <span className="inline-flex shrink-0 items-center gap-0.5 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">
+          <Calculator size={9} /> RA
+        </span>
+      )}
+    </div>
   );
 
   const compactMainRow = (
@@ -2634,9 +3075,16 @@ const ItemRow = ({
             className={`${compactInput} font-medium resize-none disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
             rows={2}
           />
+          <input
+            type="text"
+            value={effectiveHsn}
+            onChange={(e) => onUpdate({ hsn: e.target.value })}
+            disabled={disabled}
+            placeholder="HSN code"
+            className={`${compactInput} tabular-nums text-[10.5px] disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+          />
           {badges}
         </div>
-        {summaryLine}
         {item.siteSurveySource && (
           <p className="mt-0.5 text-[10px] text-text-subtle">
             Quoted: {Number(item.quotedQty || 0).toLocaleString("en-IN")} {unitLabel}
@@ -2671,7 +3119,7 @@ const ItemRow = ({
       </td>
       <td className="px-2 py-2 align-top text-center">
         <span className="text-[12px] font-bold text-textcolor tabular-nums">
-          {Number(item.rate || 0).toLocaleString("en-IN")}
+          {Number(effectiveRate || 0).toLocaleString("en-IN")}
         </span>
       </td>
       <td className="px-2 py-2 align-top text-center">
@@ -2702,6 +3150,15 @@ const ItemRow = ({
             title="Edit in full form"
           >
             <Edit3 size={11} />
+          </button>
+          <button
+            type="button"
+            onClick={onDuplicate}
+            disabled={disabled}
+            className="h-6 w-6 flex items-center justify-center rounded-md text-text-subtle hover:text-select-blue hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Duplicate row"
+          >
+            <Copy size={11} />
           </button>
           <button
             type="button"
@@ -2764,9 +3221,16 @@ const ItemRow = ({
               className={`${compactInput} font-medium resize-none disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
               rows={2}
             />
+            <input
+              type="text"
+              value={effectiveHsn}
+              onChange={(e) => onUpdate({ hsn: e.target.value })}
+              disabled={disabled}
+              placeholder="HSN code"
+              className={`${compactInput} tabular-nums text-[10.5px] disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+            />
             {badges}
           </div>
-          {!detailsOpen && summaryLine}
         </td>
         <td className="px-2 py-2 align-top text-center">
           {showDims ? (
@@ -2810,6 +3274,11 @@ const ItemRow = ({
             disabled={disabled}
             className={`${compactInput} text-center tabular-nums disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
           />
+          {item.rateAnalysis?.enabled && item.rateAnalysis?.useFinalRate && (
+            <p className="mt-1 text-[9.5px] font-semibold text-emerald-600">
+              Using RA: {formatAmount(effectiveRate)}
+            </p>
+          )}
         </td>
         <td className="px-2 py-2 align-top text-center">
           <p className="text-[12px] font-bold text-textcolor tabular-nums">
@@ -2831,7 +3300,7 @@ const ItemRow = ({
                   ? "border-select-blue/30 bg-select-blue/10 text-select-blue"
                   : "border-bordergray bg-white text-text-muted hover:text-select-blue hover:border-select-blue/30"
               }`}
-              title={detailsOpen ? "Hide details" : "Show HSN and materials"}
+              title={detailsOpen ? "Hide details" : "Show item details"}
             >
               Details
             </button>
@@ -2843,6 +3312,15 @@ const ItemRow = ({
               title="Edit in full form"
             >
               <Edit3 size={11} />
+            </button>
+            <button
+              type="button"
+              onClick={onDuplicate}
+              disabled={disabled}
+              className="h-6 w-6 flex items-center justify-center rounded-md text-text-subtle hover:text-select-blue hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Duplicate row"
+            >
+              <Copy size={11} />
             </button>
             <button
               type="button"
@@ -2913,6 +3391,12 @@ const ItemDetailsRow = ({ item, onUpdate, disabled = false }) => {
   }, [libItem]);
 
   const currentGrade = item.grade || "economy";
+  const hierarchy = item.hierarchy || {};
+  const details = item.details || {};
+  const patchHierarchy = (values) =>
+    onUpdate({ hierarchy: { ...hierarchy, ...values } });
+  const patchDetails = (values) =>
+    onUpdate({ details: { ...details, ...values } });
 
   const applyGrade = (grade) => {
     if (!libItem?.recipes?.[grade]) return;
@@ -2965,7 +3449,171 @@ const ItemDetailsRow = ({ item, onUpdate, disabled = false }) => {
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_130px] gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+          <Field icon={<Layers size={11} />} label="Block / Tower">
+            <input
+              type="text"
+              value={hierarchy.blockTower || hierarchy.block || hierarchy.tower || ""}
+              onChange={(e) => patchHierarchy({ blockTower: e.target.value })}
+              disabled={disabled}
+              placeholder="Block A / Tower 1"
+              className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+            />
+          </Field>
+          <Field icon={<Building2 size={11} />} label="Floor">
+            <input
+              type="text"
+              value={hierarchy.floor || ""}
+              onChange={(e) => patchHierarchy({ floor: e.target.value })}
+              disabled={disabled}
+              placeholder="Ground floor"
+              className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+            />
+          </Field>
+          <Field icon={<MapPin size={11} />} label="Room / Area">
+            <input
+              type="text"
+              value={hierarchy.roomArea || ""}
+              onChange={(e) => patchHierarchy({ roomArea: e.target.value })}
+              disabled={disabled}
+              placeholder="Living room"
+              className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+            />
+          </Field>
+          <Field icon={<BookOpen size={11} />} label="Work Category">
+            <input
+              type="text"
+              value={hierarchy.workCategory || ""}
+              onChange={(e) => patchHierarchy({ workCategory: e.target.value })}
+              disabled={disabled}
+              placeholder="Civil / Carpentry / Electrical"
+              className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+            />
+          </Field>
+          <Field icon={<List size={11} />} label="Sub-category">
+            <input
+              type="text"
+              value={hierarchy.subCategory || ""}
+              onChange={(e) => patchHierarchy({ subCategory: e.target.value })}
+              disabled={disabled}
+              placeholder="Wardrobe / false ceiling"
+              className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+            />
+          </Field>
+          <Field icon={<FileText size={11} />} label="Drawing Ref / Rev">
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="text"
+                value={details.drawingRefNo || ""}
+                onChange={(e) => patchDetails({ drawingRefNo: e.target.value })}
+                disabled={disabled}
+                placeholder="DRG-101"
+                className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+              />
+              <input
+                type="text"
+                value={details.drawingRevision || ""}
+                onChange={(e) => patchDetails({ drawingRevision: e.target.value })}
+                disabled={disabled}
+                placeholder="R2"
+                className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+              />
+            </div>
+          </Field>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+          <Field icon={<Hash size={11} />} label="Specification Code">
+            <input
+              type="text"
+              value={details.specificationCode || ""}
+              onChange={(e) => patchDetails({ specificationCode: e.target.value })}
+              disabled={disabled}
+              placeholder="SPEC-CARP-001"
+              className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+            />
+          </Field>
+          <Field icon={<Package size={11} />} label="Brand / Make / Model">
+            <input
+              type="text"
+              value={details.brandMakeModel || ""}
+              onChange={(e) => patchDetails({ brandMakeModel: e.target.value })}
+              disabled={disabled}
+              placeholder="Hettich / Asian Paints"
+              className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+            />
+          </Field>
+          <Field icon={<Sparkles size={11} />} label="Finish / Color / Grade">
+            <input
+              type="text"
+              value={details.finishColorGrade || ""}
+              onChange={(e) => patchDetails({ finishColorGrade: e.target.value })}
+              disabled={disabled}
+              placeholder="Matte white / BWP"
+              className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+            />
+          </Field>
+          <Field icon={<PackageCheck size={11} />} label="Item Type">
+            <select
+              value={details.itemType || ITEM_TYPES[2]}
+              onChange={(e) => patchDetails({ itemType: e.target.value })}
+              disabled={disabled}
+              className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+            >
+              {ITEM_TYPES.map((value) => (
+                <option key={value} value={value}>{value}</option>
+              ))}
+            </select>
+          </Field>
+          <Field icon={<Calculator size={11} />} label="Billing Type">
+            <select
+              value={details.billingType || BILLING_TYPES[1]}
+              onChange={(e) => patchDetails({ billingType: e.target.value })}
+              disabled={disabled}
+              className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+            >
+              {BILLING_TYPES.map((value) => (
+                <option key={value} value={value}>{value}</option>
+              ))}
+            </select>
+          </Field>
+          <Field icon={<ShieldCheck size={11} />} label="Scope Type">
+            <select
+              value={details.scopeType || SCOPE_TYPES[0]}
+              onChange={(e) => patchDetails({ scopeType: e.target.value })}
+              disabled={disabled}
+              className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+            >
+              {SCOPE_TYPES.map((value) => (
+                <option key={value} value={value}>{value}</option>
+              ))}
+            </select>
+          </Field>
+          <Field icon={<User size={11} />} label="Execution By">
+            <select
+              value={details.executionBy || EXECUTION_BY[0]}
+              onChange={(e) => patchDetails({ executionBy: e.target.value })}
+              disabled={disabled}
+              className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+            >
+              {EXECUTION_BY.map((value) => (
+                <option key={value} value={value}>{value}</option>
+              ))}
+            </select>
+          </Field>
+          <Field icon={<StickyNote size={11} />} label="Item Remarks">
+            <input
+              type="text"
+              value={details.remarks || ""}
+              onChange={(e) => patchDetails({ remarks: e.target.value })}
+              disabled={disabled}
+              placeholder="Client/internal remark"
+              className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+            />
+          </Field>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3">
           <Field icon={<FileText size={11} />} label="Specification">
             <textarea
               value={item.spec || ""}
@@ -2976,25 +3624,10 @@ const ItemDetailsRow = ({ item, onUpdate, disabled = false }) => {
               rows={2}
             />
           </Field>
-          <Field icon={<Hash size={11} />} label="HSN">
-            <input
-              type="text"
-              value={item.hsn || ""}
-              onChange={(e) => onUpdate({ hsn: e.target.value })}
-              disabled={disabled}
-              placeholder="9403"
-              list={`hsn-list-${item.id}`}
-              className={`${compactInput} tabular-nums disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
-            />
-            <datalist id={`hsn-list-${item.id}`}>
-              {HSN_SUGGESTIONS.map((h) => (
-                <option key={h.code} value={h.code}>
-                  {h.desc}
-                </option>
-              ))}
-            </datalist>
-          </Field>
         </div>
+        <MeasurementRowsEditor item={item} onUpdate={onUpdate} disabled={disabled} />
+        <RateAnalysisEditor item={item} onUpdate={onUpdate} disabled={disabled} />
+        <VendorComparisonEditor item={item} onUpdate={onUpdate} disabled={disabled} />
         <MaterialEditor item={item} onUpdate={onUpdate} disabled={disabled} />
       </td>
     </tr>
@@ -3317,6 +3950,620 @@ const MaterialEditor = ({ item, onUpdate, disabled = false }) => {
   );
 };
 
+const measurementNetQty = (row, unit) => {
+  const explicitQty = Number(row.netQuantity ?? row.qty) || 0;
+  if (explicitQty > 0) return explicitQty;
+  const nos = Number(row.nos) || 1;
+  const L = Number(row.length) || 0;
+  const B = Number(row.breadth ?? row.width) || 0;
+  const H = Number(row.height) || 0;
+  const deduction = Number(row.deduction) || 0;
+  let qty = 0;
+  if (DIMENSIONAL_UNITS[unit]?.kind === "length") {
+    qty = L;
+  } else {
+    const factors = [L, B, H].filter((v) => v > 0);
+    qty = factors.length > 0 ? factors.reduce((p, v) => p * v, 1) : 0;
+  }
+  return Math.max(0, qty * nos - deduction);
+};
+
+const MeasurementRowsEditor = ({ item, onUpdate, disabled = false }) => {
+  const rows = item.measurementRows || [];
+  const [open, setOpen] = useState(rows.length > 0);
+  const update = (next) => onUpdate({ measurementRows: next });
+  const patch = (idx, values) =>
+    update(rows.map((row, i) => (i === idx ? { ...row, ...values } : row)));
+  const add = () => {
+    update([...rows, { ...blankMeasurementRow(), unit: item.unit || "" }]);
+    setOpen(true);
+  };
+  const remove = (idx) => update(rows.filter((_, i) => i !== idx));
+  const totalQty = rows.reduce(
+    (sum, row) => sum + measurementNetQty(row, item.unit),
+    0,
+  );
+
+  return (
+    <div className="mt-3 rounded-xl border border-bordergray bg-white px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => setOpen((p) => !p)}
+          className="flex items-center gap-1.5 text-[10.5px] font-semibold text-text-muted hover:text-select-blue"
+        >
+          {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+          Measurement Sheet
+          {rows.length > 0 && (
+            <span className="text-[9.5px] font-bold text-select-blue bg-white px-1.5 py-0.5 rounded border border-bordergray">
+              {rows.length}
+            </span>
+          )}
+        </button>
+        <div className="flex items-center gap-2">
+          {rows.length > 0 && (
+            <span className="text-[10px] font-bold text-text-muted tabular-nums">
+              Qty {totalQty.toFixed(2).replace(/\.00$/, "")} {unitLabelOf(item.unit)}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={add}
+            disabled={disabled}
+            className="flex items-center gap-1 text-[10.5px] font-semibold text-select-blue hover:text-primary disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Plus size={11} /> Add row
+          </button>
+        </div>
+      </div>
+      {open && (
+        <div className="mt-2 space-y-2">
+          {rows.length === 0 ? (
+            <p className="text-[10.5px] text-text-subtle">
+              Add measurement rows to calculate BOQ quantity from location-wise measurements.
+            </p>
+          ) : (
+            rows.map((row, idx) => (
+              <div
+                key={row.id || idx}
+                className="rounded-lg border border-bordergray/70 bg-bg-soft/25 p-2"
+              >
+                <div className="grid grid-cols-1 md:grid-cols-[110px_1fr_52px_62px_62px_62px_70px_82px_70px_28px] gap-2 items-start">
+                  <input
+                    type="text"
+                    value={row.location || ""}
+                    onChange={(e) => patch(idx, { location: e.target.value })}
+                    disabled={disabled}
+                    placeholder="Location"
+                    className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+                  />
+                  <input
+                    type="text"
+                    value={row.description || ""}
+                    onChange={(e) => patch(idx, { description: e.target.value })}
+                    disabled={disabled}
+                    placeholder="Description"
+                    className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+                  />
+                  {[
+                    ["nos", "Nos"],
+                    ["length", "L"],
+                    ["breadth", "B"],
+                    ["height", "H"],
+                    ["deduction", "Deduct"],
+                  ].map(([key, label]) => (
+                    <input
+                      key={key}
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={row[key] ?? (key === "nos" ? 1 : 0)}
+                      onChange={(e) => patch(idx, { [key]: Number(e.target.value) || 0 })}
+                      disabled={disabled}
+                      placeholder={label}
+                      title={label}
+                      className={`${compactInput} text-right tabular-nums disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+                    />
+                  ))}
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={row.netQuantity ?? row.qty ?? 0}
+                    onChange={(e) =>
+                      patch(idx, {
+                        netQuantity: Number(e.target.value) || 0,
+                        qty: Number(e.target.value) || 0,
+                      })
+                    }
+                    disabled={disabled}
+                    placeholder="Net qty"
+                    title={`Calculated: ${measurementNetQty(row, item.unit).toFixed(2)}`}
+                    className={`${compactInput} text-right tabular-nums disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+                  />
+                  <input
+                    type="text"
+                    value={row.unit || item.unit || ""}
+                    onChange={(e) => patch(idx, { unit: e.target.value })}
+                    disabled={disabled}
+                    placeholder="Unit"
+                    className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => remove(idx)}
+                    disabled={disabled}
+                    className="h-7 w-7 flex items-center justify-center rounded-md text-text-subtle hover:text-red-500 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Remove measurement row"
+                  >
+                    <Trash2 size={11} />
+                  </button>
+                </div>
+                <div className="mt-2 grid grid-cols-1 md:grid-cols-[1fr_110px_110px_128px_1fr] gap-2">
+                  <input
+                    type="text"
+                    value={row.drawingPhotoRef || ""}
+                    onChange={(e) => patch(idx, { drawingPhotoRef: e.target.value })}
+                    disabled={disabled}
+                    placeholder="Drawing/photo reference"
+                    className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+                  />
+                  <input
+                    type="text"
+                    value={row.measuredBy || ""}
+                    onChange={(e) => patch(idx, { measuredBy: e.target.value })}
+                    disabled={disabled}
+                    placeholder="Measured by"
+                    className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+                  />
+                  <input
+                    type="text"
+                    value={row.checkedBy || ""}
+                    onChange={(e) => patch(idx, { checkedBy: e.target.value })}
+                    disabled={disabled}
+                    placeholder="Checked by"
+                    className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+                  />
+                  <input
+                    type="date"
+                    value={row.measurementDate || ""}
+                    onChange={(e) => patch(idx, { measurementDate: e.target.value })}
+                    disabled={disabled}
+                    className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+                  />
+                  <input
+                    type="text"
+                    value={row.remarks || ""}
+                    onChange={(e) => patch(idx, { remarks: e.target.value })}
+                    disabled={disabled}
+                    placeholder="Remarks"
+                    className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+                  />
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const rateRowAmount = (row) => {
+  const quantity = Number(row.quantity) || 0;
+  const wastage = Number(row.wastagePercent) || 0;
+  const qww = Number(row.quantityWithWastage) || quantity * (1 + wastage / 100);
+  return qww * (Number(row.rate) || 0);
+};
+
+const RateAnalysisTable = ({ title, rows, onChange, onAdd, onRemove, disabled }) => (
+  <div className="rounded-lg border border-bordergray/70 bg-bg-soft/25 p-2">
+    <div className="mb-2 flex items-center justify-between">
+      <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted">
+        {title}
+      </span>
+      <button
+        type="button"
+        onClick={onAdd}
+        disabled={disabled}
+        className="flex items-center gap-1 text-[10px] font-semibold text-select-blue hover:text-primary disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <Plus size={10} /> Add
+      </button>
+    </div>
+    <div className="space-y-1.5">
+      {rows.length === 0 ? (
+        <p className="text-[10px] text-text-subtle">No rows added.</p>
+      ) : (
+        rows.map((row, idx) => (
+          <div
+            key={row.id || idx}
+            className="grid grid-cols-1 md:grid-cols-[1fr_64px_76px_64px_86px_92px_28px] gap-2 items-start"
+          >
+            <input
+              type="text"
+              value={row.description || ""}
+              onChange={(e) => onChange(idx, { description: e.target.value })}
+              disabled={disabled}
+              placeholder="Component / contract item"
+              className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+            />
+            <input
+              type="text"
+              value={row.unit || ""}
+              onChange={(e) => onChange(idx, { unit: e.target.value })}
+              disabled={disabled}
+              placeholder="Unit"
+              className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+            />
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={row.quantity || 0}
+              onChange={(e) => onChange(idx, { quantity: Number(e.target.value) || 0 })}
+              disabled={disabled}
+              placeholder="Qty"
+              className={`${compactInput} text-right tabular-nums disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+            />
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={row.wastagePercent || 0}
+              onChange={(e) =>
+                onChange(idx, { wastagePercent: Number(e.target.value) || 0 })
+              }
+              disabled={disabled}
+              placeholder="Waste %"
+              className={`${compactInput} text-right tabular-nums disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+            />
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={row.rate || 0}
+              onChange={(e) => onChange(idx, { rate: Number(e.target.value) || 0 })}
+              disabled={disabled}
+              placeholder="Rate"
+              className={`${compactInput} text-right tabular-nums disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+            />
+            <span className="rounded-md border border-bordergray bg-white px-2 py-1.5 text-right text-[11px] font-bold tabular-nums text-textcolor">
+              {formatAmount(rateRowAmount(row))}
+            </span>
+            <button
+              type="button"
+              onClick={() => onRemove(idx)}
+              disabled={disabled}
+              className="h-7 w-7 flex items-center justify-center rounded-md text-text-subtle hover:text-red-500 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Remove row"
+            >
+              <Trash2 size={11} />
+            </button>
+          </div>
+        ))
+      )}
+    </div>
+  </div>
+);
+
+const RateAnalysisEditor = ({ item, onUpdate, disabled = false }) => {
+  const current = computeRateAnalysis(item.rateAnalysis, item.unit);
+  const [open, setOpen] = useState(!!current.enabled);
+  const applyRa = (values) => {
+    const next = computeRateAnalysis({ ...current, ...values }, item.unit);
+    onUpdate({
+      rateAnalysis: next,
+      ...(next.enabled && next.useFinalRate ? { rate: next.roundedFinalRate } : {}),
+    });
+  };
+  const changeRows = (key, rows) => applyRa({ [key]: rows });
+  const patchRow = (key, idx, values) =>
+    changeRows(
+      key,
+      (current[key] || []).map((row, i) =>
+        i === idx ? { ...row, ...values } : row,
+      ),
+    );
+  const addRow = (key) =>
+    changeRows(key, [
+      ...(current[key] || []),
+      { ...blankRateAnalysisRow(), unit: item.unit || "" },
+    ]);
+  const removeRow = (key, idx) =>
+    changeRows(key, (current[key] || []).filter((_, i) => i !== idx));
+
+  return (
+    <div className="mt-3 rounded-xl border border-bordergray bg-white px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => setOpen((p) => !p)}
+          className="flex items-center gap-1.5 text-[10.5px] font-semibold text-text-muted hover:text-select-blue"
+        >
+          {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+          Rate Analysis
+          {current.enabled && (
+            <span className="text-[9.5px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+              {formatAmount(current.roundedFinalRate)}
+            </span>
+          )}
+        </button>
+        <label className="flex items-center gap-1.5 text-[10.5px] font-semibold text-text-muted">
+          <input
+            type="checkbox"
+            checked={!!current.enabled}
+            onChange={(e) => {
+              applyRa({ enabled: e.target.checked });
+              setOpen(true);
+            }}
+            disabled={disabled}
+            className="h-3.5 w-3.5 accent-select-blue"
+          />
+          Enable
+        </label>
+      </div>
+      {open && (
+        <div className="mt-2 space-y-2">
+          <div className="grid grid-cols-2 md:grid-cols-[82px_70px_96px_96px_82px_82px_1fr] gap-2 items-end">
+            <Field icon={<Hash size={10} />} label="RA Qty">
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={current.raQuantity || 0}
+                onChange={(e) => applyRa({ raQuantity: Number(e.target.value) || 0 })}
+                disabled={disabled || !current.enabled}
+                className={`${compactInput} text-right tabular-nums disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+              />
+            </Field>
+            <Field icon={<Ruler size={10} />} label="Unit">
+              <input
+                type="text"
+                value={current.unit || item.unit || ""}
+                onChange={(e) => applyRa({ unit: e.target.value })}
+                disabled={disabled || !current.enabled}
+                className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+              />
+            </Field>
+            <Field icon={<User size={10} />} label="Labour">
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={current.labourRate || 0}
+                onChange={(e) => applyRa({ labourRate: Number(e.target.value) || 0 })}
+                disabled={disabled || !current.enabled}
+                className={`${compactInput} text-right tabular-nums disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+              />
+            </Field>
+            <Field icon={<Package size={10} />} label="Consumables">
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={current.consumables || 0}
+                onChange={(e) => applyRa({ consumables: Number(e.target.value) || 0 })}
+                disabled={disabled || !current.enabled}
+                className={`${compactInput} text-right tabular-nums disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+              />
+            </Field>
+            <Field icon={<Percent size={10} />} label="Overhead %">
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={current.overheadPercent || 0}
+                onChange={(e) =>
+                  applyRa({ overheadPercent: Number(e.target.value) || 0 })
+                }
+                disabled={disabled || !current.enabled}
+                className={`${compactInput} text-right tabular-nums disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+              />
+            </Field>
+            <Field icon={<Percent size={10} />} label="Margin %">
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={current.marginPercent || 0}
+                onChange={(e) =>
+                  applyRa({ marginPercent: Number(e.target.value) || 0 })
+                }
+                disabled={disabled || !current.enabled}
+                className={`${compactInput} text-right tabular-nums disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+              />
+            </Field>
+            <label className="flex items-center gap-1.5 pb-1 text-[10.5px] font-semibold text-text-muted">
+              <input
+                type="checkbox"
+                checked={!!current.useFinalRate}
+                onChange={(e) => applyRa({ useFinalRate: e.target.checked })}
+                disabled={disabled || !current.enabled}
+                className="h-3.5 w-3.5 accent-select-blue"
+              />
+              Use calculated rate
+            </label>
+          </div>
+          <RateAnalysisTable
+            title="Material Components"
+            rows={current.materialItems || []}
+            disabled={disabled || !current.enabled}
+            onChange={(idx, values) => patchRow("materialItems", idx, values)}
+            onAdd={() => addRow("materialItems")}
+            onRemove={(idx) => removeRow("materialItems", idx)}
+          />
+          <RateAnalysisTable
+            title="Labour / Contract Components"
+            rows={current.contractItems || []}
+            disabled={disabled || !current.enabled}
+            onChange={(idx, values) => patchRow("contractItems", idx, values)}
+            onAdd={() => addRow("contractItems")}
+            onRemove={(idx) => removeRow("contractItems", idx)}
+          />
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-2 rounded-lg border border-bordergray/70 bg-bg-soft/25 p-2 text-[10.5px]">
+            {[
+              ["Material", current.subtotalMaterials],
+              ["Labour/Contract", current.subtotalContracts + current.labourRate],
+              ["Consumables", current.subtotalConsumables],
+              ["Overhead", current.overheadAmount],
+              ["Margin", current.marginAmount],
+              ["Rounded Rate", current.roundedFinalRate],
+            ].map(([label, value]) => (
+              <div key={label}>
+                <p className="text-[9px] font-bold uppercase tracking-wider text-text-subtle">
+                  {label}
+                </p>
+                <p className="mt-0.5 font-bold tabular-nums text-textcolor">
+                  {formatAmount(value)}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const VendorComparisonEditor = ({ item, onUpdate, disabled = false }) => {
+  const rows = item.vendorComparisons || [];
+  const [open, setOpen] = useState(rows.length > 0);
+  const update = (next) => onUpdate({ vendorComparisons: next });
+  const patch = (idx, values) => {
+    const next = rows.map((row, i) => {
+      if (i !== idx) return values.selected ? { ...row, selected: false } : row;
+      return { ...row, ...values };
+    });
+    update(next);
+  };
+  const add = () => {
+    update([...rows, blankVendorComparison()]);
+    setOpen(true);
+  };
+  const remove = (idx) => update(rows.filter((_, i) => i !== idx));
+
+  return (
+    <div className="mt-3 rounded-xl border border-bordergray bg-white px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => setOpen((p) => !p)}
+          className="flex items-center gap-1.5 text-[10.5px] font-semibold text-text-muted hover:text-select-blue"
+        >
+          {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+          Vendor Comparison
+          {rows.length > 0 && (
+            <span className="text-[9.5px] font-bold text-select-blue bg-white px-1.5 py-0.5 rounded border border-bordergray">
+              {rows.length}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={add}
+          disabled={disabled}
+          className="flex items-center gap-1 text-[10.5px] font-semibold text-select-blue hover:text-primary disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <Plus size={11} /> Add vendor
+        </button>
+      </div>
+      {open && (
+        <div className="mt-2 space-y-2">
+          {rows.length === 0 ? (
+            <p className="text-[10.5px] text-text-subtle">
+              Add vendor quotes to compare commercial options for this item.
+            </p>
+          ) : (
+            rows.map((row, idx) => (
+              <div
+                key={row.id || idx}
+                className="grid grid-cols-1 md:grid-cols-[1fr_90px_64px_78px_110px_84px_1fr_28px] gap-2 items-start rounded-lg border border-bordergray/70 bg-bg-soft/25 p-2"
+              >
+                <input
+                  type="text"
+                  value={row.vendorName || ""}
+                  onChange={(e) => patch(idx, { vendorName: e.target.value })}
+                  disabled={disabled}
+                  placeholder="Vendor name"
+                  className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+                />
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={row.quotedRate || 0}
+                  onChange={(e) => patch(idx, { quotedRate: Number(e.target.value) || 0 })}
+                  disabled={disabled}
+                  placeholder="Quoted rate"
+                  className={`${compactInput} text-right tabular-nums disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+                />
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={row.gstPercent || 0}
+                  onChange={(e) => patch(idx, { gstPercent: Number(e.target.value) || 0 })}
+                  disabled={disabled}
+                  placeholder="GST %"
+                  className={`${compactInput} text-right tabular-nums disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+                />
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={row.leadTimeDays || 0}
+                  onChange={(e) =>
+                    patch(idx, { leadTimeDays: Number(e.target.value) || 0 })
+                  }
+                  disabled={disabled}
+                  placeholder="Lead days"
+                  className={`${compactInput} text-right tabular-nums disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+                />
+                <input
+                  type="text"
+                  value={row.warranty || ""}
+                  onChange={(e) => patch(idx, { warranty: e.target.value })}
+                  disabled={disabled}
+                  placeholder="Warranty"
+                  className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+                />
+                <label className="flex h-7 items-center gap-1.5 rounded-md border border-bordergray bg-white px-2 text-[10px] font-semibold text-text-muted">
+                  <input
+                    type="checkbox"
+                    checked={!!row.selected}
+                    onChange={(e) => patch(idx, { selected: e.target.checked })}
+                    disabled={disabled}
+                    className="h-3.5 w-3.5 accent-select-blue"
+                  />
+                  Select
+                </label>
+                <input
+                  type="text"
+                  value={row.selectionReason || ""}
+                  onChange={(e) => patch(idx, { selectionReason: e.target.value })}
+                  disabled={disabled}
+                  placeholder="Selection reason"
+                  className={`${compactInput} disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+                />
+                <button
+                  type="button"
+                  onClick={() => remove(idx)}
+                  disabled={disabled}
+                  className="h-7 w-7 flex items-center justify-center rounded-md text-text-subtle hover:text-red-500 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Remove vendor"
+                >
+                  <Trash2 size={11} />
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const ClientPicker = ({ current, onPick, onClear, disabled = false }) => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -3552,6 +4799,7 @@ const formatSignoffDate = (iso) => {
     year: "numeric",
   });
 };
+
 
 const AuditTrailList = ({ items = [], revisionHistory = [], onViewSnapshot }) => {
   const latest = [...items].reverse();
@@ -4360,5 +5608,69 @@ const EmptySectionsState = ({ onAdd, onAddFromTemplate, onSeed }) => (
     </div>
   </div>
 );
+
+const SurveyLinker = ({ onClose, onPick }) => {
+  const sites = useMemo(() => {
+    return getAllSites()
+      .map((s) => {
+        const flow = getDesignFlow(s.siteID);
+        if (!flow?.siteBasis) return null;
+        return { siteID: s.siteID, name: s.clientName || s.siteID };
+      })
+      .filter(Boolean);
+  }, []);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl border border-bordergray w-full max-w-sm mx-4 overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-bordergray">
+          <div>
+            <p className="text-[14px] font-bold text-textcolor">Link a Site Survey</p>
+            <p className="text-[11.5px] text-text-muted mt-0.5">
+              Pick a site with a frozen survey to generate from
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-text-subtle hover:bg-bg-soft"
+          >
+            <X size={15} />
+          </button>
+        </div>
+        <div className="px-3 py-3 max-h-72 overflow-y-auto">
+          {sites.length === 0 ? (
+            <p className="py-8 text-center text-[12.5px] text-text-subtle">
+              No sites with frozen surveys found.
+            </p>
+          ) : (
+            <div className="space-y-1">
+              {sites.map((s) => (
+                <button
+                  key={s.siteID}
+                  type="button"
+                  onClick={() => onPick(s.siteID)}
+                  className="w-full flex items-center justify-between gap-3 rounded-xl px-4 py-3 text-left hover:bg-active-bg transition-colors"
+                >
+                  <div>
+                    <p className="text-[13px] font-semibold text-textcolor">{s.name}</p>
+                    <p className="text-[11px] text-text-muted">{s.siteID}</p>
+                  </div>
+                  <Ruler size={14} className="text-text-subtle shrink-0" />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export default BOQEditor;

@@ -66,12 +66,6 @@ export const INTERIORS_PIPELINE = [
     question: "Approve the construction detail",
     deliverableTypes: ["2D Drawing", "Section", "Document"],
   },
-  {
-    key: "BOQ",
-    label: "BOQ & Costing",
-    question: "Approve the price",
-    deliverableTypes: [],
-  },
 ];
 
 // Architecture — build from land. Note the statutory-approval gate (sanctioned
@@ -696,6 +690,160 @@ export const generateStageBoq = (siteID) => {
   }
 
   return writeFlow(siteID, flow);
+};
+
+// ── Standalone BOQ generation from survey ────────────────────────────────────
+//
+// Generates (or regenerates) a main BOQ from the frozen site survey without
+// requiring the BOQ pipeline stage. Used by:
+//   • DesignPipeline → "Create BOQ" card after DRAWINGS approved
+//   • BOQList → "From Survey" new-BOQ entry point
+//
+// Returns the saved BOQ's id on success, null on failure.
+export const generateBoqFromSurvey = (siteID) => {
+  const flow = getDesignFlow(siteID);
+  if (!flow?.siteBasis) return null;
+
+  const boq = buildBoq(flow);
+  if (!boq) return null;
+
+  try {
+    const site = getSite(siteID);
+    const clientID = site?.clientID || "";
+    const clientName = site?.clientName || "";
+    const boqId = `BOQ-${siteID}`;
+    const existingBoqSummary = listBoqs().find((b) => b.id === boqId);
+    let targetBoq = existingBoqSummary ? getBoq(existingBoqSummary.id) : null;
+
+    if (!targetBoq) {
+      targetBoq = createBoq({
+        title: `BOQ — ${clientName}`,
+        parentType: "client",
+        parentId: clientID,
+        client: { name: clientName, id: clientID },
+        project: { siteID, name: site?.fullAddress || "" },
+      });
+      targetBoq.id = boqId;
+    }
+
+    // If previously issued/approved, open a new revision rather than overwriting.
+    if (targetBoq.status && targetBoq.status !== "draft") {
+      const now = new Date().toISOString();
+      const prevRev = Number(targetBoq.revision) || 1;
+      targetBoq.revisedFrom = {
+        status: targetBoq.status,
+        revision: prevRev,
+        at: now,
+        approval: targetBoq.approval || null,
+        procurement: targetBoq.procurement || null,
+      };
+      targetBoq.revisionHistory = [
+        ...(targetBoq.revisionHistory || []),
+        {
+          revision: prevRev,
+          status: targetBoq.status,
+          at: now,
+          sections: JSON.parse(JSON.stringify(targetBoq.sections || [])),
+          approval: targetBoq.approval || null,
+        },
+      ];
+      targetBoq.auditTrail = [
+        ...(targetBoq.auditTrail || []),
+        createBoqAuditEntry({
+          boq: targetBoq,
+          action: "survey_regenerated_revision",
+          label: "Survey Regenerated",
+          actor: "Design Flow",
+          details: `Revision ${prevRev + 1} opened from ${targetBoq.status} after survey regeneration.`,
+          at: now,
+        }),
+      ];
+      targetBoq.revision = prevRev + 1;
+    }
+
+    targetBoq.status = "draft";
+    targetBoq.siteID = siteID;
+    targetBoq.proposalBaseline = { ...(flow.siteBasis?.proposalBaseline || {}) };
+    targetBoq.quotedTotal = boq.quotedTotal;
+    targetBoq.surveyFrozenAt = flow.siteBasis?.frozenAt || null;
+    targetBoq.surveyVariance = boq.variance;
+
+    // Build sections + items from survey areas, merging any existing manual work.
+    const surveyAreaNames = new Set(boq.areas.map((a) => a.area));
+    const generatedSections = boq.areas.map((area) => {
+      const existingSection = (targetBoq.sections || []).find((s) => s.name === area.area);
+      const matchedIds = new Set();
+      const items = area.rows.map((row) => {
+        const existing = (existingSection?.items || []).find(
+          (it) =>
+            (row.scopeItemId && it.scopeItemId === row.scopeItemId) ||
+            it.description === row.name,
+        );
+        if (existing) matchedIds.add(existing.id);
+        const d = getElementMeasurement(
+          flow.siteBasis?.measurements,
+          area.area,
+          row,
+        );
+        const hasDims = [d.length, d.breadth ?? d.width, d.height].some(
+          (v) => Number(v) > 0,
+        );
+        return {
+          ...existing,
+          id: existing?.id || genShortId(),
+          scopeItemId: row.scopeItemId || existing?.scopeItemId || null,
+          masterId: row.masterId || existing?.masterId || null,
+          description: row.name,
+          spec: row.selectedMaterial?.specifications || row.selectedMaterial?.spec || existing?.spec || "",
+          hsn: row.selectedMaterial?.hsn || existing?.hsn || "",
+          qty: row.measuredQty,
+          unit: row.unit,
+          rate: row.rate,
+          gstPercent: row.selectedMaterial?.gstPercent ?? existing?.gstPercent ?? 18,
+          discount: existing?.discount || { type: "percent", value: 0 },
+          materials: row.materials || existing?.materials || [],
+          dimensions: {
+            enabled: hasDims,
+            length: Number(d.length) || 0,
+            breadth: Number(d.breadth ?? d.width) || 0,
+            height: Number(d.height) || 0,
+            nos: Number(d.nos) || 1,
+          },
+          siteSurveySource: true,
+          siteID,
+          quotedQty: row.quotedQty,
+          quotedAmount: row.quotedAmount,
+          measuredQty: row.measuredQty,
+          surveyVariance: row.variance,
+        };
+      });
+      return {
+        id: existingSection?.id || genShortId(),
+        name: area.area,
+        category: area.area,
+        items: [
+          ...items,
+          ...(existingSection?.items || []).filter(
+            (it) => !matchedIds.has(it.id) && !it.siteSurveySource,
+          ),
+        ],
+      };
+    });
+
+    targetBoq.sections = [
+      ...generatedSections,
+      ...(targetBoq.sections || []).filter((s) => !surveyAreaNames.has(s.name)),
+    ];
+
+    const saved = saveBoq(targetBoq);
+    flow.boqId = saved.id;
+    writeJson(designFlowKey(siteID), flow);
+    window.dispatchEvent(new Event("designFlowChanged"));
+    return saved.id;
+  } catch (err) {
+    console.error("generateBoqFromSurvey failed:", err);
+    return null;
+  }
 };
 
 // ── Sample design images (demo) ──────────────────────────────────────────────

@@ -28,7 +28,7 @@ import {
   isStageBillable,
   setStageDeliverables,
   submitStage,
-  generateStageBoq,
+
   unfreezeSurvey,
   addSampleDeliverables,
   setArchFee,
@@ -36,6 +36,7 @@ import {
   getTender,
   setTender,
   tenderEstimate,
+  generateBoqFromSurvey,
 } from "../../../data/designFlowStorage";
 
 const genId = () =>
@@ -83,7 +84,12 @@ const DesignPipeline = ({ site }) => {
   const [flow, setFlow] = useState(() => getDesignFlow(siteID));
   const [selectedKey, setSelectedKey] = useState(() => {
     const f = getDesignFlow(siteID);
-    return currentStage(f)?.key || getPipeline(f?.track)[0].key;
+    const p = getPipeline(f?.track);
+    const csKey = currentStage(f)?.key;
+    // If the current stage key no longer exists in the pipeline (e.g. BOQ was
+    // removed), fall back to the last stage in the pipeline.
+    const valid = p.find((d) => d.key === csKey) ? csKey : p[p.length - 1]?.key;
+    return valid || p[0]?.key;
   });
   const [newType, setNewType] = useState("");
   const [fileUrls, setFileUrls] = useState({}); // fileId → object URL
@@ -157,14 +163,15 @@ const DesignPipeline = ({ site }) => {
     stage?.reviewState === "DRAFTING" || stage?.reviewState === "REVISION_REQUESTED";
   const billable = isStageBillable(stage);
   const lastRevision = stage?.approvals?.find((a) => a.decision === "REVISION");
-  const isBoqStage = selectedKey === "BOQ";
   const isTenderStage = selectedKey === "TENDER";
   const stageDef = pipeline.find((d) => d.key === selectedKey);
   const deliverableTypes = stageDef?.deliverableTypes || [];
   const approvedCount = flow.stages.filter((s) => s.reviewState === "APPROVED").length;
   const deliverables = stage?.deliverables || [];
-
-  const generateBoq = () => setFlow(generateStageBoq(siteID));
+  const allStagesApproved = pipeline.every((pd) => {
+    const s = flow.stages.find((st) => st.key === pd.key);
+    return s?.reviewState === "APPROVED";
+  });
 
   const onPickFile = async (e) => {
     const file = e.target.files?.[0];
@@ -187,6 +194,18 @@ const DesignPipeline = ({ site }) => {
 
   const addSamples = () => setFlow(addSampleDeliverables(siteID, selectedKey));
   const submit = () => setFlow(submitStage(siteID, selectedKey));
+
+  const handleCreateBoq = () => {
+    if (flow.boqId) {
+      navigate(`/boq/${flow.boqId}`);
+      return;
+    }
+    const boqId = generateBoqFromSurvey(siteID);
+    if (boqId) {
+      setFlow(getDesignFlow(siteID));
+      navigate(`/boq/${boqId}`);
+    }
+  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -245,10 +264,12 @@ const DesignPipeline = ({ site }) => {
       <div className="rounded-xl border border-gray-100 bg-white px-2 py-1.5 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.1)]">
         <div className="flex items-center gap-1 overflow-x-auto">
           {flow.stages.map((s, i) => {
-            const def = pipeline[i];
+            const def = pipeline.find((d) => d.key === s.key);
+            if (!def) return null; // stage removed from pipeline (e.g. legacy BOQ)
             const active = s.key === selectedKey;
             const approved = s.reviewState === "APPROVED";
             const locked = s.reviewState === "LOCKED";
+            const visibleIdx = pipeline.findIndex((d) => d.key === s.key);
             return (
               <Fragment key={s.key}>
                 <button
@@ -270,7 +291,7 @@ const DesignPipeline = ({ site }) => {
                             : "bg-violet-100 text-violet-600"
                     }`}
                   >
-                    {approved ? <FiCheckCircle size={13} /> : locked ? <FiLock size={11} /> : i + 1}
+                    {approved ? <FiCheckCircle size={13} /> : locked ? <FiLock size={11} /> : visibleIdx + 1}
                   </span>
                   <span className="whitespace-nowrap text-[12px] font-bold text-darkgray">
                     {def.label}
@@ -302,9 +323,9 @@ const DesignPipeline = ({ site }) => {
                 <h3 className="text-[17px] font-bold text-darkgray">
                   {stageDef?.label}
                 </h3>
-                <StatusPill state={stage.reviewState} size="lg" />
+                <StatusPill state={stage?.reviewState} size="lg" />
                 <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold text-grey">
-                  Round {stage.round}
+                  Round {stage?.round}
                 </span>
                 {billable && (
                   <span className="rounded-full bg-orange-100 px-2.5 py-0.5 text-[11px] font-bold text-orange-700">
@@ -320,24 +341,24 @@ const DesignPipeline = ({ site }) => {
 
             <div className="px-6 py-5">
               {/* State banners */}
-              {stage.reviewState === "LOCKED" && (
+              {stage?.reviewState === "LOCKED" && (
                 <div className="flex items-center gap-2.5 rounded-xl border border-slate-200 bg-slate-50 p-3.5 text-[13px] text-slate-500">
                   <FiLock size={15} /> Unlocks when the previous stage is approved.
                 </div>
               )}
-              {stage.reviewState === "AWAITING_CLIENT" && (
+              {stage?.reviewState === "AWAITING_CLIENT" && (
                 <div className="flex items-center gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-[13px] text-amber-800">
                   <FiClock size={15} /> Sent to the client — awaiting approval in
                   their portal.
                 </div>
               )}
-              {stage.reviewState === "APPROVED" && (
+              {stage?.reviewState === "APPROVED" && (
                 <div className="flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 p-3.5 text-[13px] text-emerald-800">
                   <FiCheckCircle size={15} /> Approved by client
                   {stage.approvedAt ? ` · ${stage.approvedAt}` : ""}.
                 </div>
               )}
-              {stage.reviewState === "REVISION_REQUESTED" && lastRevision && (
+              {stage?.reviewState === "REVISION_REQUESTED" && lastRevision && (
                 <div className="rounded-xl border border-rose-200 bg-rose-50 p-3.5 text-[13px] text-rose-700">
                   <p className="flex items-center gap-1.5 font-bold">
                     <FiRotateCcw size={14} /> Client requested changes
@@ -348,176 +369,8 @@ const DesignPipeline = ({ site }) => {
                 </div>
               )}
 
-              {/* BOQ stage — auto-built bill */}
-              {stage.reviewState !== "LOCKED" && isBoqStage && (
-                <div className="mt-5">
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <SectionTitle>
-                      Bill of Quantities{" "}
-                      {stage.reviewState === "APPROVED" ? "(approved)" : ""}
-                    </SectionTitle>
-                    <div className="flex items-center gap-2">
-                      {stage.boq?.editorBoqId && !stage.boq.syncError && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            navigate(`/boq/${stage.boq.editorBoqId || flow.boqId || `BOQ-${siteID}`}`)
-                          }
-                          className="flex items-center gap-1.5 rounded-lg bg-select-blue px-3.5 py-1.5 text-[12px] font-semibold text-white hover:bg-blue-950 transition-all shadow-sm cursor-pointer"
-                        >
-                          Open in BOQ Editor
-                        </button>
-                      )}
-                      {firmOwns && (
-                        <button
-                          type="button"
-                          onClick={generateBoq}
-                          className="flex items-center gap-1.5 rounded-lg bg-bg-soft px-3 py-1.5 text-[12px] font-semibold text-grey hover:bg-bordergray"
-                        >
-                          <FiRefreshCw size={13} />{" "}
-                          {stage.boq ? "Regenerate" : "Generate"} from survey
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {!stage.boq ? (
-                    <p className="rounded-xl border border-dashed border-bordergray py-6 text-center text-[12.5px] text-text-subtle">
-                      Generate the bill from the frozen survey — Quoted (assumed
-                      qty) vs Measured (actual qty), at the same fixed rates.
-                    </p>
-                  ) : (
-                    <>
-                      {stage.boq.syncError && (
-                        <div className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[11.5px] font-semibold text-red-700">
-                          {stage.boq.syncError} Regenerate after freeing browser
-                          storage or resolving the storage error.
-                        </div>
-                      )}
-                      {/* Quoted vs Measured vs Variance summary */}
-                      <div className="mb-3 grid grid-cols-3 gap-2.5">
-                        <div className="rounded-xl border border-bg-soft bg-palewhite p-3">
-                          <p className="text-[10px] font-bold uppercase tracking-wider text-text-subtle">
-                            Quoted
-                          </p>
-                          <p className="mt-0.5 text-[16px] font-black text-grey tabular-nums">
-                            {inr(stage.boq.quotedTotal)}
-                          </p>
-                        </div>
-                        <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-3">
-                          <p className="text-[10px] font-bold uppercase tracking-wider text-select-blue/70">
-                            Measured (final)
-                          </p>
-                          <p className="mt-0.5 text-[16px] font-black text-select-blue tabular-nums">
-                            {inr(stage.boq.total)}
-                          </p>
-                        </div>
-                        <ToleranceTile boq={stage.boq} />
-                      </div>
-
-                      <div className="overflow-x-auto rounded-xl border border-bg-soft">
-                        <table className="w-full text-[12.5px]">
-                          <thead>
-                            <tr className="bg-palewhite text-left text-[10.5px] uppercase tracking-wider text-text-subtle">
-                              <th className="px-4 py-2.5 font-bold">Work</th>
-                              <th className="px-4 py-2.5 text-right font-bold">Quoted</th>
-                              <th className="px-4 py-2.5 text-right font-bold">Measured</th>
-                              <th className="px-4 py-2.5 text-right font-bold">Δ</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {stage.boq.areas.map((a) => (
-                              <Fragment key={a.area}>
-                                <tr className="bg-blue-50/40">
-                                  <td colSpan={2} className="px-4 py-2 font-bold text-select-blue">
-                                    {a.area}
-                                  </td>
-                                  <td className="px-4 py-2 text-right font-bold text-select-blue tabular-nums">
-                                    {inr(a.measuredSubtotal)}
-                                  </td>
-                                  <td className="px-4 py-2 text-right font-bold tabular-nums text-select-blue">
-                                    {inr(a.measuredSubtotal - a.quotedSubtotal)}
-                                  </td>
-                                </tr>
-                                {a.rows.map((r) => (
-                                  <tr key={r.name} className="border-t border-bg-soft">
-                                    <td className="px-4 py-2 text-darkgray">
-                                      {r.name}
-                                      <span className="ml-1 text-[10.5px] text-text-subtle">
-                                        @ {inr(r.rate)}/{r.unit}
-                                      </span>
-                                    </td>
-                                    <td className="px-4 py-2 text-right tabular-nums text-grey">
-                                      {(Number(r.quotedQty) || 0).toLocaleString("en-IN")} {r.unit} ·{" "}
-                                      {inr(r.quotedAmount)}
-                                    </td>
-                                    <td className="px-4 py-2 text-right font-semibold tabular-nums text-darkgray">
-                                      {(Number(r.measuredQty) || 0).toLocaleString("en-IN")} {r.unit} ·{" "}
-                                      {inr(r.measuredAmount)}
-                                    </td>
-                                    <td
-                                      className={`px-4 py-2 text-right font-semibold tabular-nums ${
-                                        r.variance > 0
-                                          ? "text-orange-600"
-                                          : r.variance < 0
-                                            ? "text-emerald-600"
-                                            : "text-text-subtle"
-                                      }`}
-                                    >
-                                      {r.variance > 0 ? "+" : ""}
-                                      {inr(r.variance)}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </Fragment>
-                            ))}
-                          </tbody>
-                          <tfoot className="bg-palewhite">
-                            <tr>
-                              <td colSpan={2} className="px-4 py-2 text-right text-grey">
-                                Subtotal
-                              </td>
-                              <td className="px-4 py-2 text-right font-semibold tabular-nums">
-                                {inr(stage.boq.measuredSubtotal)}
-                              </td>
-                              <td className="px-4 py-2 text-right tabular-nums text-text-subtle">
-                                {inr(stage.boq.variance)}
-                              </td>
-                            </tr>
-                            <tr>
-                              <td colSpan={2} className="px-4 py-2 text-right text-grey">
-                                GST ({stage.boq.gstPercent}%)
-                              </td>
-                              <td className="px-4 py-2 text-right font-semibold tabular-nums">
-                                {inr(stage.boq.gst)}
-                              </td>
-                              <td />
-                            </tr>
-                            <tr className="border-t border-bordergray">
-                              <td colSpan={2} className="px-4 py-2.5 text-right text-[14px] font-bold text-darkgray">
-                                Total
-                              </td>
-                              <td className="px-4 py-2.5 text-right text-[15px] font-black text-select-blue tabular-nums">
-                                {inr(stage.boq.total)}
-                              </td>
-                              <td />
-                            </tr>
-                          </tfoot>
-                        </table>
-                      </div>
-                    </>
-                  )}
-
-                  {firmOwns && stage.boq && (
-                    <div className="mt-5 flex justify-end">
-                      <SubmitButton onClick={submit} />
-                    </div>
-                  )}
-                </div>
-              )}
-
               {/* Tender stage — contractor construction cost + bids */}
-              {stage.reviewState !== "LOCKED" && isTenderStage && (
+              {stage?.reviewState !== "LOCKED" && isTenderStage && (
                 <TenderPanel
                   flow={flow}
                   firmOwns={firmOwns}
@@ -529,12 +382,12 @@ const DesignPipeline = ({ site }) => {
               )}
 
               {/* Creative stages — uploaded design files as a gallery */}
-              {stage.reviewState !== "LOCKED" && !isBoqStage && !isTenderStage && (
+              {stage?.reviewState !== "LOCKED" && !isTenderStage && (
                 <div className="mt-5">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                     <SectionTitle>
                       Deliverables{" "}
-                      {stage.reviewState === "APPROVED" ? "(submitted)" : ""}
+                      {stage?.reviewState === "APPROVED" ? "(submitted)" : ""}
                     </SectionTitle>
                     {firmOwns && (
                       <div className="flex items-center gap-2">
@@ -686,6 +539,35 @@ const DesignPipeline = ({ site }) => {
               </div>
             </div>
           )}
+
+          {/* Create BOQ card — shown when every pipeline stage is approved */}
+          {allStagesApproved && (
+            <div className="rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-teal-50 p-5 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.08)]">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[13.5px] font-bold text-emerald-800">
+                    Design approved — BOQ ready
+                  </p>
+                  <p className="mt-1 text-[12px] text-emerald-700">
+                    All design stages are signed off. Generate the costing BOQ from the frozen site survey.
+                  </p>
+                  {flow.boqId && (
+                    <p className="mt-1.5 text-[11px] font-medium text-emerald-600">
+                      BOQ {flow.boqId} already generated — click to open.
+                    </p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCreateBoq}
+                  className="flex shrink-0 items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-[13px] font-semibold text-white transition-all hover:bg-emerald-700 active:scale-95"
+                >
+                  <FiPlus size={14} />
+                  {flow.boqId ? "Open BOQ" : "Create BOQ"}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ── Frozen Site Basis reference (collapsible) ────────────────────── */}
@@ -821,50 +703,6 @@ const DesignPipeline = ({ site }) => {
         )}
         </div>
       </div>
-    </div>
-  );
-};
-
-const ToleranceTile = ({ boq }) => {
-  if (!boq.hasQuote) {
-    return (
-      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-          Variance
-        </p>
-        <p className="mt-0.5 text-[13px] font-bold text-slate-400">
-          No quote baseline
-        </p>
-      </div>
-    );
-  }
-  const ok = boq.withinTolerance;
-  const sign = boq.variance > 0 ? "+" : boq.variance < 0 ? "−" : "";
-  return (
-    <div
-      className={`rounded-xl border p-3 ${
-        ok ? "border-emerald-200 bg-emerald-50/60" : "border-orange-200 bg-orange-50/60"
-      }`}
-    >
-      <p
-        className={`text-[10px] font-bold uppercase tracking-wider ${
-          ok ? "text-emerald-600/80" : "text-orange-600/80"
-        }`}
-      >
-        Variance
-      </p>
-      <p
-        className={`mt-0.5 text-[16px] font-black tabular-nums ${
-          ok ? "text-emerald-700" : "text-orange-700"
-        }`}
-      >
-        {sign}₹{Math.abs(Math.round(boq.variance)).toLocaleString("en-IN")}
-      </p>
-      <p className={`text-[10px] font-semibold ${ok ? "text-emerald-600" : "text-orange-600"}`}>
-        {ok
-          ? `Increase is within ₹${boq.toleranceAmount.toLocaleString("en-IN")}`
-          : `Over proposal + ₹${boq.toleranceAmount.toLocaleString("en-IN")}`}
-      </p>
     </div>
   );
 };

@@ -4,7 +4,7 @@ import Sidebar from "./Sidebar";
 
 const MainLayout = () => {
   return (
-    <div className="h-screen w-screen flex flex-col overflow-hidden bg-overallbg font-manrope">
+    <div className="h-screen w-full flex flex-col overflow-hidden bg-overallbg font-manrope">
       <header className="shrink-0 sticky top-0 z-50">
         <Header />
       </header>

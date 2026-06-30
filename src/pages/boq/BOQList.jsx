@@ -12,7 +12,12 @@ import {
   Wallet,
   ChevronRight,
 } from "lucide-react";
-import { listBoqs, deleteBoq, duplicateBoq } from "../../data/boqStorage";
+import {
+  listBoqs,
+  deleteBoq,
+  duplicateBoq,
+  rebuildIndex,
+} from "../../data/boqStorage";
 import { formatAmount } from "../../utils/formatAmount";
 
 const STATUS_STYLES = {
@@ -56,7 +61,13 @@ const STATUS_STYLES = {
 
 const BOQList = () => {
   const navigate = useNavigate();
-  const [items, setItems] = useState(() => listBoqs());
+  // Heal the index cache from the source-of-truth records on mount (the index
+  // is derived data), then read it — done in the lazy initializer so the list
+  // reflects any migrated/renamed/older blobs without a setState-in-effect.
+  const [items, setItems] = useState(() => {
+    rebuildIndex();
+    return listBoqs();
+  });
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
 

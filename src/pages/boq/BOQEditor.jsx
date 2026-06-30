@@ -54,6 +54,7 @@ import {
   blankItem,
   blankSection,
   DIMENSIONAL_UNITS,
+  DEFAULT_BOQ_APPROVAL,
 } from "../../data/boqStorage";
 import { getOrgProfile } from "../../data/orgProfile";
 import { PAYMENT_MILESTONES } from "../../data/MilestoneConfig";
@@ -147,24 +148,7 @@ const isLockedStatus = (status) => LOCKED_STATUSES.includes(status);
 const SIGNOFF_LOCKED_STATUSES = ["signed", "issued_for_procurement", "procurement"];
 const isSignoffLockedStatus = (status) => SIGNOFF_LOCKED_STATUSES.includes(status);
 
-const DEFAULT_APPROVAL = {
-  preparedBy: "",
-  reviewedBy: "",
-  approvedBy: "",
-  clientAcceptedBy: "",
-  preparedAt: "",
-  sentAt: "",
-  reviewedAt: "",
-  approvedAt: "",
-  clientAcceptedAt: "",
-  checklist: {
-    measurementsChecked: false,
-    ratesChecked: false,
-    taxChecked: false,
-    termsChecked: false,
-  },
-  remarks: "",
-};
+const DEFAULT_APPROVAL = DEFAULT_BOQ_APPROVAL;
 
 const mergeApproval = (approval = {}) => ({
   ...DEFAULT_APPROVAL,
@@ -197,6 +181,23 @@ const appendAuditTrail = (boq, entry) => [
   ...(boq?.auditTrail || []),
   createAuditEntry({ boq, ...entry }),
 ];
+
+const createRevisionComparison = (boq, nextRevision) => ({
+  previousRevision: boq?.revision || 1,
+  currentRevision: nextRevision,
+  createdAt: new Date().toISOString(),
+  summary: {
+    sectionsAdded: 0,
+    sectionsRemoved: 0,
+    itemsAdded: 0,
+    itemsRemoved: 0,
+    itemsChanged: 0,
+    quantityDelta: 0,
+    amountDelta: 0,
+  },
+  changes: [],
+  reason: "",
+});
 
 const DEFAULT_PROCUREMENT = {
   issued: false,
@@ -823,6 +824,7 @@ const BOQEditor = () => {
   };
 
   const handleCreateRevision = () => {
+    const nextRevision = Number(boq.revision || 1) + 1;
     setConfirmDialog({
       title: "Create editable revision?",
       message: `${boq.id} Rev ${boq.revision || 1} is ${boq.status}. This will unlock a new draft revision while preserving the same BOQ record.`,
@@ -830,7 +832,7 @@ const BOQEditor = () => {
       onConfirm: () => {
         updateInternal({
           status: "draft",
-          revision: (Number(boq.revision) || 1) + 1,
+          revision: nextRevision,
           orgSnapshot: null,
           procurement: DEFAULT_PROCUREMENT,
           approval: {
@@ -857,14 +859,15 @@ const BOQEditor = () => {
               approval: mergeApproval(boq.approval),
             },
           ],
+          revisionComparison: createRevisionComparison(boq, nextRevision),
           auditTrail: appendAuditTrail(boq, {
             action: "revision_created",
             label: "Revision Created",
             actor: "System",
-            details: `Revision ${Number(boq.revision || 1) + 1} opened from ${boq.status}.`,
+            details: `Revision ${nextRevision} opened from ${boq.status}.`,
           }),
         });
-        showToast(`Revision ${Number(boq.revision || 1) + 1} created`, "success");
+        showToast(`Revision ${nextRevision} created`, "success");
       },
     });
   };
@@ -875,6 +878,43 @@ const BOQEditor = () => {
       navigate(`/boq/${next.id}`);
       showToast(`Duplicated as ${next.id}`, "success");
     }
+  };
+
+  const handleSyncHsnFromMaster = () => {
+    const library = listLibrary();
+    // Build two lookups: by masterId (exact) and by description (fuzzy fallback)
+    const masterById = {};
+    const masterByDesc = {};
+    for (const l of library) {
+      if (l.id) masterById[l.id] = l;
+      if (l.description) masterByDesc[l.description.toLowerCase().trim()] = l;
+    }
+
+    let updated = 0;
+    const newSections = (boq.sections || []).map((s) => ({
+      ...s,
+      items: (s.items || []).map((it) => {
+        const master =
+          (it.masterId ? masterById[it.masterId] : null) ||
+          masterByDesc[(it.description || "").toLowerCase().trim()];
+        const masterHsn = master?.hsn || "";
+        if (masterHsn && it.hsn !== masterHsn) {
+          updated++;
+          return { ...it, hsn: masterHsn };
+        }
+        return it;
+      }),
+    }));
+
+    if (updated > 0) {
+      updateInternal({ sections: newSections });
+    }
+    showToast(
+      updated > 0
+        ? `HSN synced for ${updated} item${updated === 1 ? "" : "s"} from Item Master`
+        : "No items matched Item Master entries with HSN set",
+      updated > 0 ? "success" : "info",
+    );
   };
 
   const handleDelete = () => {
@@ -1167,6 +1207,16 @@ const BOQEditor = () => {
                       type="button"
                       onClick={() => {
                         setShowHeaderMenu(false);
+                        handleSyncHsnFromMaster();
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-[12px] font-semibold text-text-muted hover:bg-bg-soft hover:text-textcolor"
+                    >
+                      <Hash size={13} /> Sync HSN from Item Master
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowHeaderMenu(false);
                         handleDelete();
                       }}
                       className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-[12px] font-semibold text-red-500 hover:bg-red-50"
@@ -1186,9 +1236,36 @@ const BOQEditor = () => {
               <div className="flex items-start gap-2">
                 <ShieldCheck size={14} className="mt-0.5 shrink-0" />
                 <p className="text-[11.5px] leading-relaxed">
-                  This BOQ is issued as <b>{boq.status}</b>. It is read-only to
-                  protect the controlled version. Create a revision to make
-                  changes.
+                  {boq.status === "signed" ? (
+                    <>
+                      This BOQ is <b>signed</b>. Editing is locked — click{" "}
+                      <b>Issue Procurement</b> in the toolbar to proceed, or{" "}
+                      <b>Create Revision</b> to reopen it for editing.
+                    </>
+                  ) : boq.status === "issued_for_procurement" ? (
+                    <>
+                      This BOQ has been <b>issued for procurement</b>. It is
+                      read-only to protect the controlled version. Create a
+                      revision if changes are needed.
+                    </>
+                  ) : boq.status === "procurement" ? (
+                    <>
+                      This BOQ is under active <b>procurement</b>. It is
+                      read-only to protect the controlled version. Create a
+                      revision if changes are needed.
+                    </>
+                  ) : (
+                    <>
+                      This BOQ is{" "}
+                      <b>
+                        {boq.status === "issued_for_tender"
+                          ? "issued for tender"
+                          : boq.status}
+                      </b>
+                      . It is read-only to protect the controlled version.
+                      Create a revision to make changes.
+                    </>
+                  )}
                 </p>
               </div>
             </div>
@@ -2368,27 +2445,6 @@ const BOQEditor = () => {
               </div>
             </CollapsiblePanel>
 
-            {/*  Included */}
-            <BulletListEditor
-              title="Included"
-              icon={<CheckCircle2 size={13} className="text-emerald-600" />}
-              accent="emerald"
-              items={boq.inclusions || []}
-              placeholder="e.g. 3D visualization of all rooms"
-              onChange={(next) => update({ inclusions: next })}
-              disabled={isLocked}
-            />
-
-            {/* Not Included */}
-            <BulletListEditor
-              title="Not Included"
-              icon={<X size={13} className="text-red-500" />}
-              accent="red"
-              items={boq.exclusions || []}
-              placeholder="e.g. Civil work — demolition, plumbing"
-              onChange={(next) => update({ exclusions: next })}
-              disabled={isLocked}
-            />
           </aside>
         </div>
       </div>
@@ -2552,6 +2608,26 @@ const ItemRow = ({
       (item.materials || []).length > 0,
   );
 
+  // Resolve HSN from Item Master when item is linked — scope-of-work HSN
+  // lives on the library record, not on the material rows.
+  const masterHsn = useMemo(
+    () =>
+      item.masterId
+        ? (listLibrary().find((l) => l.id === item.masterId)?.hsn || "")
+        : "",
+    [item.masterId],
+  );
+
+  // Auto-populate item.hsn from Item Master on first render if still empty.
+  useEffect(() => {
+    if (!item.hsn && masterHsn && !disabled) {
+      onUpdate({ hsn: masterHsn });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [masterHsn]);
+
+  const effectiveHsn = item.hsn || masterHsn;
+
   const updateDim = (changes) =>
     onUpdate({ dimensions: { ...(item.dimensions || {}), ...changes } });
 
@@ -2593,21 +2669,6 @@ const ItemRow = ({
     </div>
   );
 
-  const summaryLine = (
-    <p className="mt-1 text-[10.5px] text-text-muted">
-      HSN <span className="font-semibold text-textcolor">{item.hsn || "-"}</span>
-      {(item.materials || []).length > 0 && (
-        <>
-          {" | "}
-          <span className="font-semibold text-textcolor">
-            {(item.materials || []).length} material
-            {(item.materials || []).length === 1 ? "" : "s"}
-          </span>
-        </>
-      )}
-    </p>
-  );
-
   const compactMainRow = (
     <tr className="border-b border-bordergray bg-select-blue/[0.03] hover:bg-active-bg/20">
       <td className="px-2 py-2 align-top text-center">
@@ -2634,9 +2695,16 @@ const ItemRow = ({
             className={`${compactInput} font-medium resize-none disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
             rows={2}
           />
+          <input
+            type="text"
+            value={effectiveHsn}
+            onChange={(e) => onUpdate({ hsn: e.target.value })}
+            disabled={disabled}
+            placeholder="HSN code"
+            className={`${compactInput} tabular-nums text-[10.5px] disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+          />
           {badges}
         </div>
-        {summaryLine}
         {item.siteSurveySource && (
           <p className="mt-0.5 text-[10px] text-text-subtle">
             Quoted: {Number(item.quotedQty || 0).toLocaleString("en-IN")} {unitLabel}
@@ -2705,6 +2773,15 @@ const ItemRow = ({
           </button>
           <button
             type="button"
+            onClick={onDuplicate}
+            disabled={disabled}
+            className="h-6 w-6 flex items-center justify-center rounded-md text-text-subtle hover:text-select-blue hover:bg-white"
+            title="Duplicate row"
+          >
+            <Copy size={11} />
+          </button>
+          <button
+            type="button"
             onClick={onRemove}
             disabled={disabled}
             className="h-6 w-6 flex items-center justify-center rounded-md text-text-subtle hover:text-red-500 hover:bg-red-50"
@@ -2764,9 +2841,16 @@ const ItemRow = ({
               className={`${compactInput} font-medium resize-none disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
               rows={2}
             />
+            <input
+              type="text"
+              value={effectiveHsn}
+              onChange={(e) => onUpdate({ hsn: e.target.value })}
+              disabled={disabled}
+              placeholder="HSN code"
+              className={`${compactInput} tabular-nums text-[10.5px] disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
+            />
             {badges}
           </div>
-          {!detailsOpen && summaryLine}
         </td>
         <td className="px-2 py-2 align-top text-center">
           {showDims ? (
@@ -2843,6 +2927,15 @@ const ItemRow = ({
               title="Edit in full form"
             >
               <Edit3 size={11} />
+            </button>
+            <button
+              type="button"
+              onClick={onDuplicate}
+              disabled={disabled}
+              className="h-6 w-6 flex items-center justify-center rounded-md text-text-subtle hover:text-select-blue hover:bg-white"
+              title="Duplicate row"
+            >
+              <Copy size={11} />
             </button>
             <button
               type="button"
@@ -2975,24 +3068,6 @@ const ItemDetailsRow = ({ item, onUpdate, disabled = false }) => {
               className={`${compactInput} resize-none disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
               rows={2}
             />
-          </Field>
-          <Field icon={<Hash size={11} />} label="HSN">
-            <input
-              type="text"
-              value={item.hsn || ""}
-              onChange={(e) => onUpdate({ hsn: e.target.value })}
-              disabled={disabled}
-              placeholder="9403"
-              list={`hsn-list-${item.id}`}
-              className={`${compactInput} tabular-nums disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
-            />
-            <datalist id={`hsn-list-${item.id}`}>
-              {HSN_SUGGESTIONS.map((h) => (
-                <option key={h.code} value={h.code}>
-                  {h.desc}
-                </option>
-              ))}
-            </datalist>
           </Field>
         </div>
         <MaterialEditor item={item} onUpdate={onUpdate} disabled={disabled} />
@@ -3552,6 +3627,7 @@ const formatSignoffDate = (iso) => {
     year: "numeric",
   });
 };
+
 
 const AuditTrailList = ({ items = [], revisionHistory = [], onViewSnapshot }) => {
   const latest = [...items].reverse();

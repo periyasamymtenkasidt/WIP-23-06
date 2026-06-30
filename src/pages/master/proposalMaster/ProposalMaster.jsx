@@ -229,6 +229,8 @@ const ProposalMaster = () => {
   const [editingScopeIdx, setEditingScopeIdx] = useState(null);
   // Detailed read-only preview of the whole preset, grouped by room.
   const [previewOpen, setPreviewOpen] = useState(false);
+  // Read-only info modal for a single scope row: { item, idx } or null.
+  const [scopeInfo, setScopeInfo] = useState(null);
   // Whether the Add Type modal is open.
   const [addTypeModalOpen, setAddTypeModalOpen] = useState(false);
   // Preserved configs for unchecked property types. Keyed by
@@ -1332,13 +1334,10 @@ const ProposalMaster = () => {
                     <h2 className="text-[15px] font-bold text-textcolor leading-tight truncate">
                       {activeConfig?.propertyType || "Property Type"}
                     </h2>
-                    <span className="flex items-center gap-1.5 text-[11px] text-text-muted">
-                      <span className="inline-flex items-center gap-1 font-bold uppercase tracking-wider text-select-blue">
-                        <Tag size={9} /> {activeKey}
-                      </span>
-                      <span className="text-text-subtle truncate">
-                        {active.label}
-                      </span>
+                    {/* Just the preset key — the full label ("1 BHK / Studio
+                        Apartment") repeats the title + key, so it's omitted. */}
+                    <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-select-blue">
+                      <Tag size={9} /> {activeKey}
                     </span>
                   </div>
                 </div>
@@ -1796,6 +1795,17 @@ const ProposalMaster = () => {
                                             {gradeShort}
                                           </span>
                                         )}
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setScopeInfo({ item, idx });
+                                          }}
+                                          title="View scope details"
+                                          className="h-5 w-5 flex items-center justify-center rounded-md text-text-subtle hover:text-select-blue hover:bg-active-bg transition-colors shrink-0"
+                                        >
+                                          <Info size={12} />
+                                        </button>
                                       </div>
                                       {item.description && (
                                         <span
@@ -1854,7 +1864,7 @@ const ProposalMaster = () => {
                                       </span>
                                       <span className="inline-flex items-baseline gap-1.5">
                                         <span className="text-[9px] font-bold uppercase tracking-wider text-text-subtle">
-                                          Rate
+                                          Rate/Sqft
                                         </span>
                                         <span className="text-[11px] font-semibold text-textcolor tabular-nums">
                                           ₹{Number(item.rate || 0).toLocaleString("en-IN")}
@@ -2504,6 +2514,129 @@ const ProposalMaster = () => {
               );
             })}
           </div>
+        </Modal>
+      )}
+
+      {scopeInfo && (
+        <Modal
+          title={
+            scopeInfo.item.itemName ||
+            scopeInfo.item.area ||
+            "Scope details"
+          }
+          subtitle={`${scopeInfo.item.area || "Unassigned"}${
+            activeConfig?.propertyType ? ` · ${activeConfig.propertyType}` : ""
+          }`}
+          maxWidth="max-w-[560px]"
+          onClose={() => setScopeInfo(null)}
+          footer={
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const { idx } = scopeInfo;
+                  setScopeInfo(null);
+                  openEditScope(idx);
+                }}
+                className="px-3.5 py-2 rounded-lg bg-select-blue text-white text-[12px] font-semibold hover:bg-primary"
+              >
+                Edit scope
+              </button>
+              <button
+                type="button"
+                onClick={() => setScopeInfo(null)}
+                className="px-3.5 py-2 rounded-lg border border-bordergray text-[12px] font-semibold text-text-muted hover:bg-bg-soft"
+              >
+                Close
+              </button>
+            </div>
+          }
+        >
+          {(() => {
+            const s = scopeInfo.item;
+            const hasDimensions =
+              Number(s.length) > 0 ||
+              Number(s.breadth) > 0 ||
+              Number(s.height) > 0;
+            const qtyLabel = `${Number(s.qty || 0).toLocaleString("en-IN", {
+              maximumFractionDigits: 2,
+            })}${s.unit ? ` ${s.unit}` : ""}`;
+            // Compact metadata pairs — only the ones with a value are shown.
+            const meta = [
+              {
+                label: "Grade",
+                value: s.grade ? (
+                  <span
+                    className={`inline-flex items-center text-[9.5px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${gradeChipStyle(
+                      s.grade,
+                    )}`}
+                  >
+                    {gradeLabel(s.grade)}
+                  </span>
+                ) : null,
+              },
+              {
+                label: "Est. days",
+                value:
+                  s.days !== "" && s.days != null ? `${s.days} days` : null,
+              },
+              { label: "HSN", value: s.hsn || null },
+              {
+                label: "Dimensions",
+                value: hasDimensions
+                  ? `${s.length || 0} × ${s.breadth || 0} × ${s.height || 0}`
+                  : null,
+              },
+            ].filter((m) => m.value);
+
+            // Ordered rows for the spec table — quantity/rate lead, then
+            // descriptive attributes. Empty values are dropped.
+            const rows = [
+              { label: "Quantity", value: qtyLabel },
+              {
+                label: "Rate",
+                value: `${formatAmount(s.rate)}${s.unit ? ` / ${s.unit}` : ""}`,
+              },
+              ...meta.map((m) => ({ label: m.label, value: m.value })),
+            ].filter((r) => r.value);
+
+            return (
+              <div className="space-y-5">
+                {s.description && (
+                  <p className="text-[12.5px] text-textcolor leading-relaxed">
+                    {s.description}
+                  </p>
+                )}
+
+                {/* Spec sheet — key/value rows with an emphasized total footer */}
+                <div className="rounded-xl border border-bordergray overflow-hidden">
+                  <dl>
+                    {rows.map((r) => (
+                      <div
+                        key={r.label}
+                        className="flex items-center justify-between gap-4 px-4 py-2.5 border-b border-bordergray"
+                      >
+                        <dt className="text-[11.5px] text-text-muted">
+                          {r.label}
+                        </dt>
+                        <dd className="text-[12.5px] font-semibold text-textcolor tabular-nums text-right">
+                          {r.value}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                  <div className="flex items-center justify-between gap-4 px-4 py-3 bg-active-bg/60">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-select-blue">
+                      Total Amount
+                    </span>
+                    <span className="text-[16px] font-bold text-select-blue tabular-nums">
+                      {formatAmount(s.amount)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </Modal>
       )}
     </div>

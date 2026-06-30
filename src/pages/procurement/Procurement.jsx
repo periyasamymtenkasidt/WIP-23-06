@@ -71,7 +71,9 @@ const Procurement = () => {
 
   return (
     <div className="h-full flex flex-col bg-overallbg">
-      <div className="bg-white border-b rounded-xl border-bordergray shrink-0">
+      {/* Tab bar — a contained card (margins on the sides) so it has a clear
+          right/left boundary instead of stretching to the screen edge. */}
+      <div className="relative z-10 mx-3 mt-3 bg-white border border-bordergray rounded-xl shrink-0">
         <div className="px-6 pt-4 pb-2 flex items-center gap-2">
           <div className="h-8 w-8 rounded-lg bg-select-blue/10 text-select-blue flex items-center justify-center">
             <ShoppingCart size={14} />
@@ -86,7 +88,7 @@ const Procurement = () => {
             </p>
           </div>
         </div>
-        <div className="px-6 flex items-center gap-1 -mb-px">
+        <div className="px-6 flex items-center gap-1">
           {TABS.map((tab) => {
             const Icon = tab.icon;
             const isActive = tab.id === activeTab;
@@ -95,10 +97,10 @@ const Procurement = () => {
                 key={tab.id}
                 type="button"
                 onClick={() => setTab(tab.id)}
-                className={`relative flex items-center gap-1.5 px-3.5 py-2.5 text-[12px] font-semibold border-b-2 transition-all ${
+                className={`relative z-10 flex items-center gap-1.5 px-3.5 py-2.5 text-[12px] font-semibold transition-all after:absolute after:left-0 after:right-0 after:-bottom-px after:h-0.5 after:rounded-full ${
                   isActive
-                    ? "text-select-blue border-select-blue"
-                    : "text-text-muted border-transparent hover:text-textcolor hover:bg-bg-soft/50"
+                    ? "text-select-blue after:bg-select-blue"
+                    : "text-text-muted after:bg-transparent hover:text-textcolor hover:bg-bg-soft/50"
                 }`}
                 title={tab.description}
               >

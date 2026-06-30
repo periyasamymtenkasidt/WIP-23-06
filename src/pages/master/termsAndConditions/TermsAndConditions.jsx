@@ -8,7 +8,6 @@ import {
   CheckCircle2,
   XCircle,
   Save,
-  FileCheck,
   Star,
   Edit2,
 } from "lucide-react";
@@ -387,37 +386,42 @@ const TermsAndConditions = () => {
     desc: "",
   };
 
+  // Total inclusion + exclusion entries across every category — the top-bar
+  // stat. Few categories, so a direct reduce is fine.
+  const totalTerms = categories.reduce(
+    (sum, c) => sum + getCategoryCount(c.id),
+    0,
+  );
+
   return (
     <div className="bg-overallbg font-sans h-full overflow-y-auto pb-28 scroll-hidden-bar">
-      {/* Header Banner */}
-      <div className="sticky top-0 z-30 bg-overallbg/80 backdrop-blur-xl border-b border-bordergray/70">
-        <div className="px-6 py-4 flex justify-between items-center flex-wrap gap-3">
-          <div className="flex gap-3">
-            <div className="relative h-11 w-11 rounded-xl bg-linear-to-br from-select-blue to-primary text-white flex items-center justify-center shadow-lg shadow-select-blue/20">
-              <FileCheck size={18} />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-[20px] font-bold text-textcolor leading-tight">
-                  Terms & Conditions Master
-                </h1>
-                <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  Global Templates
-                </span>
-              </div>
-              <p className="text-[12px] text-text-muted mt-0.5">
-                Configure global inclusions and exclusions across all terms categories
-              </p>
-            </div>
+      {/* Single sticky toolbar — stats (left) + action (right). No page
+          title/description: the active Master tab already names this page. */}
+      <div className="sticky top-0 z-30 px-6 py-3 bg-overallbg/80 backdrop-blur-xl border-b border-bordergray/70">
+        <div className="flex items-center gap-x-4 gap-y-2 flex-wrap">
+          <div className="flex items-center gap-x-3 gap-y-1 flex-wrap text-[11.5px]">
+            <span className="inline-flex items-center gap-1.5">
+              <RiListCheck3 size={13} className="text-blue-500" />
+              <span className="font-bold text-textcolor tabular-nums">
+                {categories.length}
+              </span>
+              <span className="text-text-muted">categories</span>
+            </span>
+            <span className="h-3 w-px bg-bordergray" />
+            <span className="inline-flex items-center gap-1.5">
+              <CheckCircle2 size={12} className="text-emerald-500" />
+              <span className="font-bold text-textcolor tabular-nums">
+                {totalTerms}
+              </span>
+              <span className="text-text-muted">terms</span>
+            </span>
           </div>
-
           <button
             type="button"
             onClick={handleOpenCreateModal}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-linear-to-br from-select-blue to-primary text-white text-[11.5px] font-bold hover:shadow-md transition-all cursor-pointer"
+            className="flex items-center gap-1.5 ml-auto px-3.5 py-1.5 rounded-lg bg-linear-to-br from-select-blue to-primary text-white text-[12px] font-semibold shadow-md hover:scale-[1.02] transition-all cursor-pointer"
           >
-            <Plus size={14} />
-            <span>Add Category</span>
+            <Plus size={13} /> Add Category
           </button>
         </div>
       </div>

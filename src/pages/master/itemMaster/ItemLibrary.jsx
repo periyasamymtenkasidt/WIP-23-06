@@ -117,67 +117,79 @@ const ItemLibrary = () => {
 
   return (
     <div className="bg-overallbg font-sans h-full overflow-y-auto scroll-hidden-bar">
-      {/* Header */}
-      <div className="px-6 py-5 border-b border-bordergray/70 bg-overallbg/80 backdrop-blur-xl sticky top-0 z-10">
-        <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
-          <div className="flex items-center gap-3">
-            <div className="h-11 w-11 rounded-xl bg-linear-to-br from-select-blue to-primary text-white flex items-center justify-center shadow-lg shadow-select-blue/20">
-              <BookOpen size={18} />
-            </div>
-            <div>
-              <h1 className="text-[20px] font-bold text-textcolor leading-tight">
-                Item Master
-              </h1>
-              <p className="text-[12px] text-text-muted mt-0.5">
-                Reusable rate library · click-insert any item into a BOQ with
-                materials, HSN, and pricing
-              </p>
-            </div>
+      {/* Single sticky toolbar — stats (left) + search & actions (right). No
+          page title/description: the active Master tab already names this page. */}
+      <div className="px-6 py-3 border-b border-bordergray/70 bg-overallbg/80 backdrop-blur-xl sticky top-0 z-10">
+        <div className="flex items-center gap-x-4 gap-y-2 flex-wrap">
+          <div className="flex items-center gap-x-3 gap-y-1 flex-wrap text-[11.5px]">
+            <StatChip
+              icon={<BookOpen size={12} className="text-blue-500" />}
+              value={stats.total}
+              label="items"
+            />
+            <span className="h-3 w-px bg-bordergray" />
+            <StatChip
+              icon={<Clock size={12} className="text-purple-500" />}
+              value={`${stats.avgDays}d`}
+              label="avg"
+            />
+            <span className="h-3 w-px bg-bordergray" />
+            <StatChip
+              icon={<IndianRupee size={12} className="text-orange-500" />}
+              value={formatAmount(stats.avgRate)}
+              label="avg rate"
+            />
+            <span className="h-3 w-px bg-bordergray" />
+            <StatChip
+              icon={<TrendingUp size={12} className="text-emerald-500" />}
+              value={stats.usage}
+              label="insertions"
+            />
+            {query && (
+              <>
+                <span className="h-3 w-px bg-bordergray" />
+                <span className="font-semibold text-select-blue tabular-nums">
+                  {filtered.length} match{filtered.length === 1 ? "" : "es"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setQuery("")}
+                  className="text-[11px] font-semibold text-select-blue hover:underline"
+                >
+                  Clear
+                </button>
+              </>
+            )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 ml-auto flex-wrap">
+            <div className="relative">
+              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-subtle" />
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search name, HSN, tag"
+                className="bg-white border border-bordergray rounded-lg pl-7 pr-3 py-1.5 text-[11.5px] placeholder:text-text-subtle focus:outline-none focus:border-select-blue/40 w-[200px] lg:w-[240px]"
+              />
+            </div>
             <span
               title="Changes are saved automatically"
-              className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-semibold text-text-muted bg-bg-soft border border-bordergray"
+              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11.5px] font-semibold text-text-muted bg-bg-soft border border-bordergray"
             >
               <CheckCircle2 size={13} /> Auto-saved
             </span>
             <button
               type="button"
               onClick={() => setEditing(blankLibraryItem())}
-              className="flex items-center gap-1.5 px-4 py-2 bg-linear-to-br from-select-blue to-primary text-white rounded-lg text-[12px] font-semibold shadow-md hover:scale-[1.02] transition-all cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-linear-to-br from-select-blue to-primary text-white rounded-lg text-[12px] font-semibold shadow-md hover:scale-[1.02] transition-all cursor-pointer"
             >
               <Plus size={13} /> New Item
             </button>
           </div>
         </div>
-
-        {/* Stats */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <BentoStat icon={<BookOpen size={13} />} label="Library Items" value={stats.total} tint="blue" />
-          <BentoStat icon={<Clock size={13} />} label="Avg Days" value={`${stats.avgDays}d`} tint="purple" />
-          <BentoStat icon={<IndianRupee size={13} />} label="Avg Item Rate" value={formatAmount(stats.avgRate)} tint="orange" />
-          <BentoStat icon={<TrendingUp size={13} />} label="Total Insertions" value={stats.usage} tint="emerald" />
-        </div>
       </div>
 
       <div className="px-6 py-5">
-        {/* Search */}
-        <div className="bg-white rounded-2xl border border-bordergray shadow-[0_1px_3px_rgba(15,23,42,0.04)] p-3 mb-4 flex items-center justify-between flex-wrap gap-3">
-          <p className="text-[12px] text-text-muted font-medium px-1">
-            {filtered.length} of {items.length} work item
-            {items.length === 1 ? "" : "s"}
-          </p>
-          <div className="relative">
-            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-subtle" />
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search name, HSN, tag"
-              className="bg-bg-soft border border-transparent rounded-lg pl-7 pr-3 py-1.5 text-[11.5px] placeholder:text-text-subtle focus:outline-none focus:bg-white focus:border-select-blue/30 w-[280px]"
-            />
-          </div>
-        </div>
 
         {/* Item grid */}
         {filtered.length === 0 ? (
@@ -350,23 +362,15 @@ const ItemCard = ({ item, onEdit, onDelete, onBuildup }) => {
   );
 };
 
-const BentoStat = ({ icon, label, value, tint }) => {
-  const tints = {
-    blue: "from-blue-50 to-white text-blue-600 border-blue-100",
-    purple: "from-purple-50 to-white text-purple-600 border-purple-100",
-    orange: "from-orange-50 to-white text-orange-600 border-orange-100",
-    emerald: "from-emerald-50 to-white text-emerald-600 border-emerald-100",
-  };
-  return (
-    <div className={`relative bg-linear-to-br ${tints[tint]} border rounded-xl p-3 overflow-hidden`}>
-      <div className="flex items-center justify-between mb-1">
-        <span className="opacity-80">{icon}</span>
-        <span className="text-[9.5px] font-bold uppercase tracking-wider opacity-70">{label}</span>
-      </div>
-      <p className="text-[16px] font-bold text-textcolor tabular-nums leading-tight">{value}</p>
-    </div>
-  );
-};
+// Compact inline stat — value + muted label with a leading icon. Replaces the
+// large bento cards so the header stays a single tight bar.
+const StatChip = ({ icon, value, label }) => (
+  <span className="inline-flex items-center gap-1.5">
+    {icon}
+    <span className="font-bold text-textcolor tabular-nums">{value}</span>
+    <span className="text-text-muted">{label}</span>
+  </span>
+);
 
 const ConfirmDialog = ({ title, message, confirmLabel, danger, onCancel, onConfirm }) => (
   <div

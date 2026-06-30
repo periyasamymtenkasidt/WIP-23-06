@@ -186,27 +186,67 @@ const MaterialMaster = () => {
 
   return (
     <div className="bg-overallbg font-sans h-full overflow-y-auto">
-      {/* Header */}
-      <div className="px-6 py-5 border-b border-bordergray/70 bg-overallbg/80 backdrop-blur-xl sticky top-0 z-10">
-        <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
-          <div className="flex items-center gap-3">
-            <div className="h-11 w-11 rounded-xl bg-linear-to-br from-select-blue to-primary text-white flex items-center justify-center shadow-lg shadow-select-blue/20">
-              <Layers size={18} />
-            </div>
-            <div>
-              <h1 className="text-[20px] font-bold text-textcolor leading-tight">
-                Material Master
-              </h1>
-              <p className="text-[12px] text-text-muted mt-0.5">
-                Catalog of raw construction materials, bulk pricing, and HSNC
-                codes.
-              </p>
-            </div>
+      {/* Single sticky toolbar — stats (left) + search & actions (right). No
+          page title/description: the active Master tab already names this page. */}
+      <div className="px-6 py-3 border-b border-bordergray/70 bg-overallbg/80 backdrop-blur-xl sticky top-0 z-10">
+        <div className="flex items-center gap-x-4 gap-y-2 flex-wrap">
+          <div className="flex items-center gap-x-3 gap-y-1 flex-wrap text-[11.5px]">
+            <StatChip
+              icon={<Layers size={12} className="text-blue-500" />}
+              value={stats.total}
+              label="materials"
+            />
+            <span className="h-3 w-px bg-bordergray" />
+            <StatChip
+              icon={<IndianRupee size={12} className="text-orange-500" />}
+              value={formatAmount(stats.avgPrice)}
+              label="avg price"
+            />
+            <span className="h-3 w-px bg-bordergray" />
+            <StatChip
+              icon={<Package size={12} className="text-purple-500" />}
+              value={stats.cement}
+              label="cement"
+            />
+            <span className="h-3 w-px bg-bordergray" />
+            <StatChip
+              icon={<TrendingUp size={12} className="text-emerald-500" />}
+              value={stats.steel}
+              label="steel & wire"
+            />
+            {query && (
+              <>
+                <span className="h-3 w-px bg-bordergray" />
+                <span className="font-semibold text-select-blue tabular-nums">
+                  {filtered.length} match{filtered.length === 1 ? "" : "es"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setQuery("")}
+                  className="text-[11px] font-semibold text-select-blue hover:underline"
+                >
+                  Clear
+                </button>
+              </>
+            )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 ml-auto flex-wrap">
+            <div className="relative">
+              <Search
+                size={12}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-subtle"
+              />
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search by name or HSN code"
+                className="bg-white border border-bordergray rounded-lg pl-7 pr-3 py-1.5 text-[11.5px] placeholder:text-text-subtle focus:outline-none focus:border-select-blue/40 w-[200px] lg:w-[240px]"
+              />
+            </div>
             <span
               title="Changes are saved automatically"
-              className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-semibold text-text-muted bg-bg-soft border border-bordergray"
+              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11.5px] font-semibold text-text-muted bg-bg-soft border border-bordergray"
             >
               <CheckCircle2 size={13} /> Auto-saved
             </span>
@@ -222,62 +262,15 @@ const MaterialMaster = () => {
                   gstPercent: 18,
                 })
               }
-              className="flex items-center gap-1.5 px-4 py-2 bg-linear-to-br from-select-blue to-primary text-white rounded-lg text-[12px] font-semibold shadow-md hover:scale-[1.02] transition-all cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-linear-to-br from-select-blue to-primary text-white rounded-lg text-[12px] font-semibold shadow-md hover:scale-[1.02] transition-all cursor-pointer"
             >
               <Plus size={13} /> New Material
             </button>
           </div>
         </div>
-
-        {/* Stats */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <BentoStat
-            icon={<Layers size={13} />}
-            label="Total Materials"
-            value={stats.total}
-            tint="blue"
-          />
-          <BentoStat
-            icon={<IndianRupee size={13} />}
-            label="Avg Unit Price"
-            value={formatAmount(stats.avgPrice)}
-            tint="orange"
-          />
-          <BentoStat
-            icon={<Package size={13} />}
-            label="Cement Variants"
-            value={stats.cement}
-            tint="purple"
-          />
-          <BentoStat
-            icon={<TrendingUp size={13} />}
-            label="Steel & Wire Specs"
-            value={stats.steel}
-            tint="emerald"
-          />
-        </div>
       </div>
 
       <div className="px-6 py-5">
-        {/* Filter bar */}
-        <div className="bg-white rounded-2xl border border-bordergray shadow-[0_1px_3px_rgba(15,23,42,0.04)] p-3 mb-4 flex items-center justify-between gap-3">
-          <p className="text-[12px] font-bold text-textcolor">
-            Raw Material Specifications
-          </p>
-          <div className="relative">
-            <Search
-              size={12}
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-subtle"
-            />
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by name or HSN code"
-              className="bg-bg-soft border border-transparent rounded-lg pl-7 pr-3 py-1.5 text-[11.5px] placeholder:text-text-subtle focus:outline-none focus:bg-white focus:border-select-blue/30 w-[280px]"
-            />
-          </div>
-        </div>
 
         {/* Grid List */}
         {filtered.length === 0 ? (
@@ -591,29 +584,15 @@ const MaterialMaster = () => {
   );
 };
 
-const BentoStat = ({ icon, label, value, tint }) => {
-  const tints = {
-    blue: "from-blue-50 to-white text-blue-600 border-blue-100",
-    purple: "from-purple-50 to-white text-purple-600 border-purple-100",
-    orange: "from-orange-50 to-white text-orange-600 border-orange-100",
-    emerald: "from-emerald-50 to-white text-emerald-600 border-emerald-100",
-  };
-  return (
-    <div
-      className={`relative bg-linear-to-br ${tints[tint]} border rounded-xl p-3 overflow-hidden`}
-    >
-      <div className="flex items-center justify-between mb-1">
-        <span className="opacity-80">{icon}</span>
-        <span className="text-[9.5px] font-bold uppercase tracking-wider opacity-70">
-          {label}
-        </span>
-      </div>
-      <p className="text-[16px] font-bold text-textcolor tabular-nums leading-tight">
-        {value}
-      </p>
-    </div>
-  );
-};
+// Compact inline stat — value + muted label with a leading icon. Replaces the
+// large bento cards so the header stays a single tight bar.
+const StatChip = ({ icon, value, label }) => (
+  <span className="inline-flex items-center gap-1.5">
+    {icon}
+    <span className="font-bold text-textcolor tabular-nums">{value}</span>
+    <span className="text-text-muted">{label}</span>
+  </span>
+);
 
 const ConfirmDialog = ({
   title,

@@ -164,6 +164,7 @@ const SIGNOFF_LOCKED_STATUSES = ["signed", "issued_for_procurement", "procuremen
 const isSignoffLockedStatus = (status) => SIGNOFF_LOCKED_STATUSES.includes(status);
 
 const DEFAULT_APPROVAL = DEFAULT_BOQ_APPROVAL;
+const DEFAULT_APPROVAL = DEFAULT_BOQ_APPROVAL;
 
 const mergeApproval = (approval = {}) => ({
   ...DEFAULT_APPROVAL,
@@ -196,6 +197,23 @@ const appendAuditTrail = (boq, entry) => [
   ...(boq?.auditTrail || []),
   createAuditEntry({ boq, ...entry }),
 ];
+
+const createRevisionComparison = (boq, nextRevision) => ({
+  previousRevision: boq?.revision || 1,
+  currentRevision: nextRevision,
+  createdAt: new Date().toISOString(),
+  summary: {
+    sectionsAdded: 0,
+    sectionsRemoved: 0,
+    itemsAdded: 0,
+    itemsRemoved: 0,
+    itemsChanged: 0,
+    quantityDelta: 0,
+    amountDelta: 0,
+  },
+  changes: [],
+  reason: "",
+});
 
 const createRevisionComparison = (boq, nextRevision) => ({
   previousRevision: boq?.revision || 1,
@@ -846,6 +864,7 @@ const BOQEditor = () => {
 
   const handleCreateRevision = () => {
     const nextRevision = Number(boq.revision || 1) + 1;
+    const nextRevision = Number(boq.revision || 1) + 1;
     setConfirmDialog({
       title: "Create editable revision?",
       message: `${boq.id} Rev ${boq.revision || 1} is ${boq.status}. This will unlock a new draft revision while preserving the same BOQ record.`,
@@ -853,6 +872,7 @@ const BOQEditor = () => {
       onConfirm: () => {
         updateInternal({
           status: "draft",
+          revision: nextRevision,
           revision: nextRevision,
           orgSnapshot: null,
           procurement: DEFAULT_PROCUREMENT,
@@ -881,13 +901,16 @@ const BOQEditor = () => {
             },
           ],
           revisionComparison: createRevisionComparison(boq, nextRevision),
+          revisionComparison: createRevisionComparison(boq, nextRevision),
           auditTrail: appendAuditTrail(boq, {
             action: "revision_created",
             label: "Revision Created",
             actor: "System",
             details: `Revision ${nextRevision} opened from ${boq.status}.`,
+            details: `Revision ${nextRevision} opened from ${boq.status}.`,
           }),
         });
+        showToast(`Revision ${nextRevision} created`, "success");
         showToast(`Revision ${nextRevision} created`, "success");
       },
     });
@@ -1395,6 +1418,36 @@ const BOQEditor = () => {
               <div className="flex items-start gap-2">
                 <ShieldCheck size={14} className="mt-0.5 shrink-0" />
                 <p className="text-[11.5px] leading-relaxed">
+                  {boq.status === "signed" ? (
+                    <>
+                      This BOQ is <b>signed</b>. Editing is locked — click{" "}
+                      <b>Issue Procurement</b> in the toolbar to proceed, or{" "}
+                      <b>Create Revision</b> to reopen it for editing.
+                    </>
+                  ) : boq.status === "issued_for_procurement" ? (
+                    <>
+                      This BOQ has been <b>issued for procurement</b>. It is
+                      read-only to protect the controlled version. Create a
+                      revision if changes are needed.
+                    </>
+                  ) : boq.status === "procurement" ? (
+                    <>
+                      This BOQ is under active <b>procurement</b>. It is
+                      read-only to protect the controlled version. Create a
+                      revision if changes are needed.
+                    </>
+                  ) : (
+                    <>
+                      This BOQ is{" "}
+                      <b>
+                        {boq.status === "issued_for_tender"
+                          ? "issued for tender"
+                          : boq.status}
+                      </b>
+                      . It is read-only to protect the controlled version.
+                      Create a revision to make changes.
+                    </>
+                  )}
                   {boq.status === "signed" ? (
                     <>
                       This BOQ is <b>signed</b>. Editing is locked — click{" "}
@@ -2998,6 +3051,26 @@ const ItemRow = ({
 
   const effectiveHsn = item.hsn || masterHsn;
 
+  // Resolve HSN from Item Master when item is linked — scope-of-work HSN
+  // lives on the library record, not on the material rows.
+  const masterHsn = useMemo(
+    () =>
+      item.masterId
+        ? (listLibrary().find((l) => l.id === item.masterId)?.hsn || "")
+        : "",
+    [item.masterId],
+  );
+
+  // Auto-populate item.hsn from Item Master on first render if still empty.
+  useEffect(() => {
+    if (!item.hsn && masterHsn && !disabled) {
+      onUpdate({ hsn: masterHsn });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [masterHsn]);
+
+  const effectiveHsn = item.hsn || masterHsn;
+
   const updateDim = (changes) =>
     onUpdate({ dimensions: { ...(item.dimensions || {}), ...changes } });
 
@@ -3074,6 +3147,14 @@ const ItemRow = ({
             placeholder="Item description"
             className={`${compactInput} font-medium resize-none disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
             rows={2}
+          />
+          <input
+            type="text"
+            value={effectiveHsn}
+            onChange={(e) => onUpdate({ hsn: e.target.value })}
+            disabled={disabled}
+            placeholder="HSN code"
+            className={`${compactInput} tabular-nums text-[10.5px] disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
           />
           <input
             type="text"
@@ -3220,6 +3301,14 @@ const ItemRow = ({
               placeholder="Item description"
               className={`${compactInput} font-medium resize-none disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
               rows={2}
+            />
+            <input
+              type="text"
+              value={effectiveHsn}
+              onChange={(e) => onUpdate({ hsn: e.target.value })}
+              disabled={disabled}
+              placeholder="HSN code"
+              className={`${compactInput} tabular-nums text-[10.5px] disabled:bg-bg-soft disabled:text-text-subtle disabled:cursor-not-allowed`}
             />
             <input
               type="text"
@@ -4799,6 +4888,7 @@ const formatSignoffDate = (iso) => {
     year: "numeric",
   });
 };
+
 
 
 const AuditTrailList = ({ items = [], revisionHistory = [], onViewSnapshot }) => {

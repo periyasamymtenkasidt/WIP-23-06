@@ -886,13 +886,48 @@ export const saveBoq = (boq) => {
     procurementIssuedAt: next.procurement?.issuedAt || "",
     contractId: next.procurement?.contractId || "",
     grandTotal: totals.grandTotal,
-    itemCount: (next.sections || []).reduce(
+    itemCount: (record.sections || []).reduce(
       (s, sec) => s + (sec.items?.length || 0),
       0,
     ),
-    updatedAt: next.updatedAt,
-    createdAt: next.createdAt,
+    updatedAt: record.updatedAt,
+    createdAt: record.createdAt,
   };
+};
+
+// Rebuild the entire index from the source-of-truth records. Scans every
+// `boq_<id>` blob, loads it through getBoq (so each is migrated + normalized),
+// and regenerates its summary, most-recently-updated first. Call on list load
+// to heal an index that drifted from the records (e.g. older/renamed blobs).
+export const rebuildIndex = () => {
+  const records = [];
+  for (let i = 0; i < localStorage.length; i += 1) {
+    const k = localStorage.key(i);
+    if (!k || !k.startsWith("boq_") || k === INDEX_KEY) continue;
+    const record = getBoq(k.slice(4)); // strip the "boq_" prefix → id
+    if (record) records.push(record);
+  }
+  records.sort(
+    (a, b) =>
+      new Date(b.updatedAt || 0).getTime() -
+      new Date(a.updatedAt || 0).getTime(),
+  );
+  const index = records.map(boqSummary);
+  localStorage.setItem(INDEX_KEY, JSON.stringify(index));
+  return index;
+};
+
+export const saveBoq = (boq) => {
+  const next = {
+    ...normalizeBoq(boq),
+    updatedAt: new Date().toISOString(),
+  };
+  localStorage.setItem(ITEM_KEY(next.id), JSON.stringify(next));
+  // Patch just this entry in the index cache for speed; the index stays fully
+  // rebuildable from records via rebuildIndex().
+  const idx = listBoqs();
+  const existing = idx.find((b) => b.id === next.id);
+  const summary = boqSummary(next);
   const nextIdx = existing
     ? idx.map((b) => (b.id === next.id ? summary : b))
     : [summary, ...idx];
